@@ -107,6 +107,21 @@ fuser -k 16671/tcp 2>/dev/null    # kill anything stuck on the port
 | Page up in current buffer | `tmux send-keys -t NAME PageUp` |
 | End / Home | `tmux send-keys -t NAME End` / `Home` |
 
+### Timing (learned the hard way)
+
+| Operation | Minimum sleep |
+|---|---|
+| Between `/quote` slash-commands sent in succession | **1.5s** — anything less and weechat starts dropping the next one (input buffering interacts with screen redraws). 0.7s is too short. |
+| After `/connect` before sending any CAP commands | 2.5s — let the welcome sequence finish first |
+| Before `tmux kill-session` (final cleanup) | 1.5–2s — `kill-session` is synchronous and will preempt in-flight TCP writes between weechat and the server |
+
+**Tip**: when verifying claims about wire behavior, read Ergo's debug log (`/tmp/ergo-*.log` after `start-ergo.sh`) rather than `tmux capture-pane`. The debug log is the source of truth — it shows what actually hit the server. Weechat's display can be ahead of, behind of, or different from what got transmitted, especially around CAP renegotiation and scroll-mode interactions.
+
+```bash
+# After running a recipe, check ergo's wire log:
+grep "userinput\|useroutput" /tmp/ergo-CHAPTER.log | tail -30
+```
+
 ### What doesn't work (or is unreliable)
 
 | Claim | Reality |

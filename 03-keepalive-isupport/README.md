@@ -118,14 +118,78 @@ Three changes on top of chapter 02, all incremental:
 ```bash
 # Verify everything (parser + 5 runtime steps):
 ./verify.sh
-
-# Or watch the wire traffic with a real client:
-go run .
-weechat -t
-/server add toy localhost/6667 -notls -autoconnect
-/connect toy
-/quote ISUPPORT             # see the 005 we sent
 ```
+
+### Watching it interactively in weechat
+
+Chapter 03 has nothing to do with channels — none of the new behavior (005, PING/PONG, casemapping) needs a JOIN. To observe what's new, you just connect and watch the wire.
+
+```bash
+# Terminal A — short IDLE_TIMEOUT so PING/PONG happens within seconds.
+IDLE_TIMEOUT=5 go run .
+
+# Terminal B — weechat
+weechat
+```
+
+In weechat, after the version banner:
+
+```
+/server add toy localhost/6667 -notls
+/connect toy
+```
+
+Then **press `Alt+R`** (or `/server raw`) to open the raw IRC buffer. That's where chapter 03's new behavior is visible.
+
+What to look for, in the raw buffer:
+
+**Right after connect** — the welcome sequence, including chapter 03's contribution:
+
+```
+<-- :irc.example 001 lin :Welcome to AgentIRC, lin
+<-- :irc.example 002 lin :Your host is irc.example, running ch03
+<-- :irc.example 003 lin :This server has no MOTD
+<-- :irc.example 004 lin irc.example ch03 i nt
+<-- :irc.example 005 lin NETWORK=AgentIRC CASEMAPPING=rfc1459 CHANTYPES=# PREFIX= NICKLEN=30 CHANNELLEN=64 TOPICLEN=390 :are supported by this server
+```
+
+That `005` line is the one chapter 03 added.
+
+**5 seconds of idleness later** — PING from the server, PONG back from weechat:
+
+```
+<-- :irc.example PING :3qhx5dl9b
+--> PONG :3qhx5dl9b
+```
+
+Weechat replies automatically; you don't have to do anything. Wait another 5 seconds, see another PING/PONG. This is the chapter-03 keepalive in action.
+
+**To watch a ping timeout** (the server dropping an unresponsive client):
+
+```
+# Terminal C — netcat, no auto-PONG
+nc -C localhost 6667
+NICK ghost
+USER ghost 0 * :ghost
+```
+
+Sit there. After 5 seconds the server emits `:irc.example PING :<token>`. Don't type anything. ~5 seconds later, the connection closes (the server log shows `ping timeout`).
+
+**To watch the rfc1459 casemapping collision** — you need two clients trying to claim equivalent nicks:
+
+```
+# Terminal C
+nc -C localhost 6667
+NICK Foo[bar]
+USER foo 0 * :foo
+
+# Terminal D
+nc -C localhost 6667
+NICK foo{bar}
+USER foo 0 * :foo
+```
+
+Terminal D will receive `:irc.example 433 * foo{bar} :Nickname is already in use` — the server folded `[]` and `{}` to the same casefolded form and rejected the second registration. Plain ASCII lowercasing would have let both through.
 
 The full verify run produces output like:
 

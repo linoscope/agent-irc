@@ -1,0 +1,8 @@
+# Build artifacts
+.ch*-server
+*-channels/0*-channels
+**/.ch*-server
+**/01-hello-irc/01-hello-irc
+**/02-channels/02-channels
+**/verify/verify
+**/04-retiring-the-toy/data/

@@ -76,6 +76,22 @@ A capability is a *named string* like `account-tag`, `multi-prefix`, or `sasl`. 
 
 A capability can also carry a *value*: `sasl=PLAIN,EXTERNAL,SCRAM-SHA-256` tells the client which SASL mechanisms are available. Plain caps have no value.
 
+### How is CAP different from 005?
+
+Reasonable question after chapter 03. Both are "what does the server support." Different problems though:
+
+| | 005 / `RPL_ISUPPORT` | CAP |
+|---|---|---|
+| What it conveys | passive facts: limits, namespaces, casemapping | active behaviors that change how the protocol acts |
+| Direction | server announces; client just adapts | bidirectional — client must REQ before behavior turns on |
+| Per-session state | none — same for everyone | each session opts into a different set |
+| Example token | `NICKLEN=30` (a limit you must respect) | `account-tag` (a behavior; tags only appear if you opted in) |
+| Era | added ~1999 | IRCv3, 2012+ |
+
+The shorthand: **005 is passive facts about the server. CAP is active features you opt into.** A useful test — does enabling this *change behavior for this session*? If yes, it's CAP. If it's just a limit or a fact, it's 005.
+
+`sasl=PLAIN,EXTERNAL,SCRAM-SHA-256` looks parameter-ish (like a 005 token) but it's a CAP value because *whether the server lets you `AUTHENTICATE` at all* depends on the REQ. The value just lists which mechanisms are available *if you opt in*.
+
 ### What chapter 05 changes
 
 The chapter-04 Ergo fork has all the standard caps. Chapter 05 adds **one new vendor cap**:

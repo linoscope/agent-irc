@@ -42,24 +42,26 @@ The trick: **clients opt in.** A modern feature is invisible to a client that do
 Recall chapter 01's registration handshake: `NICK` + `USER` → `001 RPL_WELCOME`. CAP wedges itself *into* that handshake by holding it open:
 
 ```
-client → CAP LS 302         ┐  trapdoor opens — server now knows
-                            │  registration is held while caps are negotiated
-client → NICK alice         │
-client → USER alice 0 * :…  │
-                            │  (server must NOT emit 001 yet)
-server → CAP * LS :cap1 cap2 cap3 …       ← here's everything I support
-                            │
-client → CAP REQ :cap1 cap2               ← give me these (atomic)
-                            │
-server → CAP * ACK :cap1 cap2             ← granted
-                            │
-                            │  (auth, configuration, anything that
-                            │   needs to happen pre-001 goes here —
-                            │   chapter 06's SASL lives in this window)
-                            │
-client → CAP END            ┘  trapdoor closes
-                            
-server → 001 alice :Welcome…    registration completes normally
+[trapdoor opens; registration is now held until CAP END]
+
+  C -> CAP LS 302
+  C -> NICK alice
+  C -> USER alice 0 * :Alice
+       (server must NOT emit 001 yet)
+
+  S -> CAP * LS :cap1 cap2 cap3 ...        # here's everything I support
+  C -> CAP REQ :cap1 cap2                   # give me these (atomic)
+  S -> CAP * ACK :cap1 cap2                 # granted
+
+       (auth, configuration, anything that needs to happen
+        pre-001 goes here -- chapter 06's SASL lives in this
+        window)
+
+  C -> CAP END
+
+[trapdoor closes; registration completes normally]
+
+  S -> 001 alice :Welcome...
 ```
 
 The `302` is the **CAP version** the client claims to speak. Version 302 is what enables continuation lines (`CAP * LS *` followed by another `CAP * LS`), capability values (`sasl=PLAIN,EXTERNAL`), and `cap-notify` for changes after registration. Without `302`, you get the older one-line dump and the server breaks gracefully if it overflows.
@@ -183,17 +185,18 @@ PASS: agent-irc.example/hello advertised, REQ acknowledged, registration complet
 Without CAP, registration is `NICK + USER → 001`. With `CAP LS 302`, the trapdoor opens:
 
 ```
-client → server: CAP LS 302              ┐
-client → server: NICK alice               │ — server *must not* emit 001
-client → server: USER alice 0 * :Alice    │   while CAP negotiation is in flight
-                                          │
-server → client: CAP * LS * :cap1 cap2 …  │ — `*` after LS = continuation
-server → client: CAP * LS :capN capN+1    │ — no `*` = final batch
-                                          │
-client → server: CAP REQ :cap1 cap2       │ — atomic: all-or-nothing
-server → client: CAP * ACK cap1 cap2      │   (or NAK if any unsupported)
-                                          │
-client → server: CAP END                  ┘ — release the trapdoor
+  C -> CAP LS 302
+  C -> NICK alice
+  C -> USER alice 0 * :Alice                  # server *must not* emit 001
+                                              # while CAP negotiation is in flight
+
+  S -> CAP * LS * :cap1 cap2 ...              # `*` after LS = continuation
+  S -> CAP * LS :capN capN+1                  # no `*` = final batch
+
+  C -> CAP REQ :cap1 cap2                     # atomic: all-or-nothing
+  S -> CAP * ACK cap1 cap2                    # (or NAK if any unsupported)
+
+  C -> CAP END                                # release the trapdoor
                                           
 server → client: 001 alice :Welcome …       — registration completes
 ```

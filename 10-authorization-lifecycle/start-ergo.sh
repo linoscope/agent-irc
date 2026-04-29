@@ -26,6 +26,9 @@ src = re.sub(
 src = src.replace("    enabled: true\n\n    # default language", "    enabled: false\n\n    # default language")
 src = src.replace("path: ircd.db", "path: data/ircd.db")
 src = src.replace('lock-file: "ircd.lock"', 'lock-file: "data/ircd.lock"')
+# Verbose logging so chapter readers can see PRIVMSG / userinput on stderr.
+src = src.replace('type: "* -userinput -useroutput"', 'type: "* userinput useroutput"')
+src = re.sub(r'^        level: info$', '        level: debug', src, count=1, flags=re.MULTILINE)
 new_block = """
     erc8004:
         rpc-url: "$RPC"

@@ -88,15 +88,6 @@ The shorthand: **005 is passive facts about the server. CAP is active features y
 
 `sasl=PLAIN,EXTERNAL,SCRAM-SHA-256` looks parameter-ish (like a 005 token) but it's a CAP value because *whether the server lets you `AUTHENTICATE` at all* depends on the REQ. The value just lists which mechanisms are available *if you opt in*.
 
-### Why CAP is interesting beyond IRC
-
-Every protocol that has to evolve under an installed base hits the same problem. HTTP/2 settles for `Upgrade:` headers and content negotiation. TLS uses extensions in the ClientHello. IMAP has `CAPABILITY`. SSH has `kex-algorithms`. They all do roughly the same thing — "advertise what you have, let the peer pick what they understand, both sides commit."
-
-IRC's CAP is unusually clean for two reasons:
-
-1. **Asymmetric.** The server lists; the client picks. Not "negotiate." This avoids the combinatorial explosion of "well, I'll do A if you do B unless C" that plagues TLS extension dependencies.
-2. **Atomic REQ.** A client asks for a *set* of caps; the server enables all of them or none. No partial commits. Half-enabled feature sets cause more bugs than missing features.
-
 ## What you'll learn
 
 - The `CAP LS / CAP REQ / CAP ACK / CAP END` handshake and how it holds registration open.

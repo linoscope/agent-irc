@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# verify.sh — chapter 05: confirm our vendor capability lands in CAP LS 302
-# and is REQ-able. Starts the agent-irc fork, runs the verify, tears down.
+# verify.sh — chapter 05b: confirm our vendor capability lands in CAP LS 302
+# and is REQ-able. Starts the agent-irc fork (vendor cap), runs the verify, tears down.
 set -euo pipefail
 cd "$(dirname "$0")"
 

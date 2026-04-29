@@ -17,7 +17,7 @@ mkdir -p data
 
 # Pull the chapter-04 minimal config and fix the listener.
 if [[ ! -f ircd.yaml ]]; then
-    cp ../05-capability-negotiation/ircd.yaml .
+    cp ../05b-vendor-capability/ircd.yaml .
 fi
 sed -i -E "s/\":[0-9]+\":/\":$PORT\":/" ircd.yaml
 

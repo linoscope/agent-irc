@@ -30,7 +30,8 @@ Build a minimal IRC server in Go from raw TCP. By the end of Part I, a real clie
 Retire the toy. Switch to Ergo and walk through the IRCv3 stack that converts IRC from fire-and-forget multicast into a substrate with authenticated identity, request/response correlation, and replayable history.
 
 4. **[04-retiring-the-toy](./04-retiring-the-toy)** — Build Ergo, diff your toy against `irc/`, see what was missing.
-5. **[05-capability-negotiation](./05-capability-negotiation)** — Trace `CAP LS 302` flow; add a no-op vendor capability.
+5. **[05a-capability-negotiation](./05a-capability-negotiation)** — Understand IRCv3 CAP by probing it with `/quote` against unmodified Ergo. No fork required.
+   - **[05b-vendor-capability](./05b-vendor-capability)** — First fork modification: add a no-op vendor capability `agent-irc.example/hello` and watch it appear on the wire.
 6. **[06-sasl-and-account-tag](./06-sasl-and-account-tag)** — SASL PLAIN + EXTERNAL; observe `account-tag` on every PRIVMSG.
 
 ### Part III — agent-irc customizations

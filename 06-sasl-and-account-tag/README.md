@@ -30,10 +30,10 @@ The `account=alice` tag is **server-attested**. The client did not write it. The
 
 ### How does the session "previously authenticate"?
 
-SASL — the authentication framework — runs *inside* the CAP-LS-held registration window from chapter 05. The whole flow:
+SASL — the authentication framework — runs *inside* the CAP-LS-held registration window from chapter 05a. The whole flow:
 
 ```
- 1. CAP LS 302                                # trapdoor opens (chapter 05)
+ 1. CAP LS 302                                # trapdoor opens (chapter 05a)
  2. NICK / USER
  3. CAP REQ :sasl message-tags account-tag ...
  4. CAP * ACK
@@ -122,7 +122,7 @@ Notice Alice's message carries `account=Alice`; Bob's has no `account=` tag at a
 
 ### SASL inside the CAP-LS-held window
 
-The whole point of CAP LS 302 holding registration open (chapter 05) is to give SASL somewhere to run. The flow:
+The whole point of CAP LS 302 holding registration open (chapter 05a) is to give SASL somewhere to run. The flow:
 
 ```
   C -> CAP LS 302
@@ -238,7 +238,7 @@ We get to that mechanism in chapter 07.
 
 ```
 06-sasl-and-account-tag/
-├── ircd.yaml             # auto-copied from chapter 05 by start-ergo.sh
+├── ircd.yaml             # auto-copied from chapter 05b by start-ergo.sh
 ├── start-ergo.sh         # builds the agent-irc fork, runs on :16672
 ├── go.mod
 ├── verify/main.go        # 4-phase: REGISTER, SASL PLAIN, anon, account-tag

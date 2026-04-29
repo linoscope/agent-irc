@@ -92,7 +92,7 @@ Five things this picture surfaces that come back constantly:
 | **PRIVMSG** | The "send a message" verb. Targets a channel (`#room`) or a nick (`bob`). |
 | **NOTICE** | Like PRIVMSG but, by convention, no auto-reply. Used for system messages and bot notifications. |
 | **PING / PONG** | Keepalive (chapter 03). |
-| **CAP** | "Capability negotiation" — IRCv3's mechanism for clients and servers to opt into newer features without breaking old ones (chapter 05). |
+| **CAP** | "Capability negotiation" — IRCv3's mechanism for clients and servers to opt into newer features without breaking old ones (chapter 05a). |
 | **SASL** | The authentication framework, run inside the CAP-held registration window (chapter 06). |
 | **`account-tag`** | An IRCv3 message tag that carries a verified account name on every message — the only honest identity signal (chapter 06). |
 
@@ -154,7 +154,7 @@ To verify automatically: `./verify.sh` — exits 0 iff the handshake completes.
 
 ### The wire format
 
-Every IRC message is a single line terminated by **CR LF**, capped at 512 bytes including the CR LF. That cap is load-bearing: nick lengths, channel-name limits, kick reasons, MOTD lines all bow to it. (IRCv3 message tags get a separate ~4 KB budget — chapter 05.)
+Every IRC message is a single line terminated by **CR LF**, capped at 512 bytes including the CR LF. That cap is load-bearing: nick lengths, channel-name limits, kick reasons, MOTD lines all bow to it. (IRCv3 message tags get a separate ~4 KB budget — chapter 05a.)
 
 The shape of a line is:
 
@@ -213,7 +213,7 @@ After `001`, you're "registered" and can issue any other command. Real servers a
 
 ### Why this state machine matters
 
-The pre-registration state is the trapdoor that makes IRCv3 capability negotiation possible. We'll see in chapter 05 that `CAP LS` *holds the door open* — the client says "wait, I have things to negotiate" and registration doesn't complete (no `001`) until the client sends `CAP END`. Meanwhile SASL authentication runs inside that hold. Without the two-stage handshake, there'd be nowhere to graft authentication on.
+The pre-registration state is the trapdoor that makes IRCv3 capability negotiation possible. We'll see in chapter 05a that `CAP LS` *holds the door open* — the client says "wait, I have things to negotiate" and registration doesn't complete (no `001`) until the client sends `CAP END`. Meanwhile SASL authentication runs inside that hold. Without the two-stage handshake, there'd be nowhere to graft authentication on.
 
 ## Critical Thinking: line-framing as a security boundary
 

@@ -34,7 +34,7 @@ server:
 
     # addresses to listen on
     listeners:
-        ":16671":
+        ":16677":
 
     unix-bind-mode: 0777
 

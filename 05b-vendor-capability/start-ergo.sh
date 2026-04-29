@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 
 ERGO_SRC="${ERGO_SRC:-$HOME/workspace/agent-irc-ergo}"
 ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc}"
-PORT="${PORT:-16671}"
+PORT="${PORT:-16677}"
 
 # Always rebuild — chapter 05+ work modifies the fork, and a stale binary
 # masking a recompile failure would silently invalidate the verify.

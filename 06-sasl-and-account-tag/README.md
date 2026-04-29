@@ -242,10 +242,10 @@ That asymmetry — alice's messages are authenticated-attributed, bob's aren't �
 Ergo (with `force-nick-equals-account` on, the default) refuses:
 
 ```
-<-- :ergo.test 432 Alice alice2 :Erroneous nickname: nick is reserved for an account
+<-- :ergo.test 400 Alice NICK :You must use your account name as your nickname
 ```
 
-Authenticated sessions can't escape their account name. Chapter 09 makes this property load-bearing for ERC-8004 binding.
+(The exact numeric varies by ircd — Ergo emits `400`; other implementations may use `432 ERR_ERRONEUSNICKNAME` or `447 ERR_NONICKCHANGE`. The behavior is what matters: authenticated sessions can't escape their account name. Chapter 09 makes this property load-bearing for ERC-8004 binding.)
 
 ## Walkthrough
 

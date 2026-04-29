@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	port    = "16671"
+	port    = "16677"
 	wantCap = "agent-irc.example/hello"
 )
 

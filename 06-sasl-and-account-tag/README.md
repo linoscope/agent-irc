@@ -181,16 +181,22 @@ The 900/903 numerics are the deliverable of the chapter. Past 903, this session 
 
 #### Step 2: connect Bob via nc (no auth)
 
-Bob doesn't authenticate. Give him a long-lived nc session:
+Bob doesn't authenticate, but he *does* opt into the same message tags as alice. Without `account-tag` in his cap set, the server wouldn't stamp the tag on incoming messages — and we'd never see step 3's payoff.
 
 ```bash
 # Terminal C
 nc -C localhost 16672
+CAP LS 302
 NICK bob
 USER bob 0 * :Bob
+CAP REQ :account-tag message-tags server-time
+                            # wait for CAP * ACK :account-tag message-tags server-time
+CAP END
                             # wait for 001
 JOIN #demo
 ```
+
+This makes the asymmetry sharp: bob and alice both REQ `account-tag`. The *only* difference is alice did SASL inside her CAP window and bob didn't.
 
 #### Step 3: alice joins, sends a message
 

@@ -1,0 +1,134 @@
+*3
+$3
+set
+$24
+0 AP9VDdQKv3n1mI5ZYY3bVw
+$2
+24
+*3
+$3
+set
+$24
+0 qta40HS1Q0uhF-kQcfte5Q
+$43
+DvimKGIUqTjpqNuoHlhsuBcyf3RxO8ak17a7FWbH-R4
+*3
+$3
+set
+$24
+0 V9e9BUFp-SxBYKo4u24M6w
+$248
+"-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgLaz8HDezeS0tzUqR\nLaaDI+PDE6zXREvFa+mJCPMTA8ShRANCAASNiMaJaMg5cY1+X2EVeGilJVA1QJyD\ngFs10/ymfnwz+I5ZNgjJA6ZP+XitgXuuE8TRu59JcWRrMlAtdlOzqNu2\n-----END PRIVATE KEY-----\n"
+*5
+$3
+set
+$22
+account.name alice-bot
+$9
+alice-bot
+$2
+ae
+$10
+1777577791
+*5
+$3
+set
+$33
+account.registered.time alice-bot
+$19
+1777462591304980296
+$2
+ae
+$10
+1777577791
+*5
+$3
+set
+$29
+account.credentials alice-bot
+$106
+{"Version":1,"PassphraseHash":null,"Certfps":null,"Salt":null,"Iters":0,"StoredKey":null,"ServerKey":null}
+$2
+ae
+$10
+1777577791
+*5
+$3
+set
+$26
+account.settings alice-bot
+$0
+
+$2
+ae
+$10
+1777577791
+*5
+$3
+set
+$24
+account.exists alice-bot
+$1
+1
+$2
+ae
+$10
+1777577791
+*5
+$3
+set
+$34
+account.verificationcode alice-bot
+$0
+
+$2
+ae
+$10
+1777577791
+*2
+$3
+del
+$34
+account.verificationcode alice-bot
+*3
+$3
+set
+$24
+account.exists alice-bot
+$1
+1
+*3
+$3
+set
+$22
+account.name alice-bot
+$9
+alice-bot
+*3
+$3
+set
+$33
+account.registered.time alice-bot
+$19
+1777462591304980296
+*3
+$3
+set
+$29
+account.credentials alice-bot
+$106
+{"Version":1,"PassphraseHash":null,"Certfps":null,"Salt":null,"Iters":0,"StoredKey":null,"ServerKey":null}
+*3
+$3
+set
+$26
+account.settings alice-bot
+$0
+
+*3
+$3
+set
+$26
+account.verified alice-bot
+$1
+1

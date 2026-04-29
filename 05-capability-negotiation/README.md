@@ -1,14 +1,41 @@
 # Chapter 05 — Capability negotiation
 
-The first modification to our Ergo fork. We add a no-op vendor capability — `agent-irc.example/hello` — that appears in `CAP LS 302` and can be REQ'd by a client. By the end of this chapter you've made an Ergo source change, regenerated code, rebuilt, and watched it land on the wire.
+## What you'll do, in plain English
 
-This is the warm-up. The mechanism we exercise here — the IRCv3 capability table — is exactly where chapters 07–10 hook in.
+Until now we've been *running* Ergo. This chapter is the first time we *change* it.
+
+The change is small on purpose: we'll teach Ergo to advertise one new "feature flag" called `agent-irc.example/hello`. The flag does nothing useful — that's the point. We're rehearsing the workflow on something whose absence of behavior makes any failure obvious. The actually-interesting customizations (chapters 07–10) reuse the exact same workflow.
+
+The four steps you'll perform:
+
+1. **Edit one file** in the Ergo fork — `gencapdefs.py`. Add a 5-line block naming our new feature.
+2. **Run a code generator.** That Python file *generates* a Go file (`irc/caps/defs.go`). Run `python3 gencapdefs.py > irc/caps/defs.go`; the Go file gets rewritten to include our new cap.
+3. **Rebuild Ergo.** `go build` produces a new binary that knows about the cap.
+4. **Watch it on the wire.** Connect a test client, ask the server "what features do you support?" — confirm `agent-irc.example/hello` shows up in the answer.
+
+That's the chapter.
+
+A bit of vocabulary you'll see throughout, in plain language:
+
+| Term | Plain English |
+|---|---|
+| **Capability** (or "cap") | A feature flag — a named optional behavior the server *can* do that the client has to opt into. Like HTTP's `Accept-Encoding: gzip` but for IRC. |
+| **Vendor capability** | A cap we made up ourselves, not part of any standard. We name it under a domain (`agent-irc.example/...`) so it doesn't clash with standard ones. |
+| **No-op** | Doesn't do anything. Empty behavior. We're proving the plumbing works before adding actual behavior in chapter 07. |
+| **CAP LS** | The command a client sends to ask "what features do you support?" |
+| **CAP REQ** | The command a client sends to opt into a feature. |
+| **CAP ACK / NAK** | The server's reply: "ok, granted" / "no, can't do that." |
+| **`CAP LS 302`** | The same `CAP LS` command with an integer arg saying "I speak version 302 of CAP, send me the modern format." |
+| **Code generation** | Ergo's list of caps lives in a Python file that generates Go code. Edit Python, run a script, the Go file is overwritten. We don't edit `defs.go` directly. |
+| **Wire** | The actual TCP bytes flowing between client and server. "Watch it on the wire" = look at the literal bytes a real client sees. |
+
+If any of those still feels foggy, the next section ("Mental model") explains the underlying problem CAP solves and why this design.
 
 ## Mental model: how IRC adds features without breaking anyone
 
 IRC has been deployed for 30+ years. There are clients still in use that were written in 2003. There are servers still running C code from 1998. Adding new features (account-tag, message IDs, server-time, SASL, message tags, multiline messages, replies, edits, deletions, …) without breaking that installed base is the puzzle CAP solves.
 
-The trick: **clients opt in.** A modern feature is invisible to a client that doesn't know to ask for it; visible the moment they do. The server advertises what it knows; the client requests the subset it understands; both sides agree before any new behavior turns on.
+The trick: **clients opt in.** A modern feature is invisible to a client that doesn't know to ask for it; visible the moment they do. The server advertises what it knows; the client requests the subset it understands; both sides agree before any new behavior turns on. A 2003 client that has never heard of `account-tag` connects to a 2026 server, the server doesn't shove tags at it, the client behaves normally — both sides happy.
 
 ### Where CAP lives in the connection lifecycle
 

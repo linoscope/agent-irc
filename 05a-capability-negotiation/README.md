@@ -97,17 +97,18 @@ The shorthand: **005 is passive facts about the server. CAP is active features y
 
 ## What you'll build
 
-A small Go program (`verify/main.go`) that drives the CAP handshake by hand against unmodified Ergo and confirms the standard caps are advertised. Plus the muscle memory to do the same exploration interactively in weechat.
+Nothing in code. The deliverable of this chapter is **muscle memory**: connect to a running IRC server, drive CAP by hand from your everyday client, and read the responses fluently.
 
-No fork modifications, no rebuild. Uses upstream Ergo (`~/workspace/ergo`) — the same binary chapter 04 built.
+No fork modifications, no rebuild, no Go program. Uses upstream Ergo (`~/workspace/ergo`) — the same binary chapter 04 built.
 
 ## Run it
 
 ```bash
-./verify.sh
+# Start upstream Ergo on :16671, then walk the interactive recipe below.
+./start-ergo.sh
 ```
 
-This starts upstream Ergo on `:16671`, runs a 6-step CAP handshake, and asserts that all of `account-tag`, `server-time`, `message-tags`, `sasl`, `batch`, and `echo-message` are present. Output ends with `PASS`.
+The chapter has no automated `verify.sh`. Either Ergo is running and you can `CAP LS 302` it, or it isn't — and weechat's connection-time CAP handshake is the same protocol exchange as any verify program would do, just observable in the raw buffer. **The interactive recipe IS the verification.**
 
 ### Watching it interactively in weechat
 
@@ -225,13 +226,10 @@ For our agent-irc threat model this is mostly fine — the deployment isn't tryi
 05a-capability-negotiation/
 ├── ircd.yaml               # minimal Ergo config (same as chapter 04, port :16671)
 ├── start-ergo.sh           # builds *upstream* Ergo (~/workspace/ergo) — no fork
-├── go.mod
-├── verify/main.go          # CAP LS 302 → REQ → ACK → 001 e2e
-├── verify.sh               # start Ergo, run verify, tear down
 └── README.md
 ```
 
-No fork modifications.
+No fork modifications, no Go program — the chapter is the recipe.
 
 ## Next
 

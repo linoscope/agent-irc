@@ -178,6 +178,102 @@ Output:
 PASS: agent-irc.example/hello advertised, REQ acknowledged, registration completes
 ```
 
+### Watching it interactively in weechat
+
+The `verify` program drives the protocol from scratch. To get the same view in weechat — and to *poke at the cap surface manually* — drop into the raw IRC buffer.
+
+```bash
+# Terminal A — start the fork.
+./start-ergo.sh
+```
+
+```
+# Terminal B — connect and open the raw buffer.
+weechat
+/server add agent-irc localhost/16671 -notls
+/connect agent-irc
+```
+
+Press **`Alt+R`** to open weechat's raw IRC buffer. This is the closest thing to the `nc` view — every line in both directions, in chronological order.
+
+#### Step 1: see the LS that weechat already did at connect time
+
+Scroll up in the raw buffer. Weechat sent `CAP LS 302` automatically as part of its connection sequence; the response is right there:
+
+```
+<-- :ergo.test CAP * LS * :account-notify account-tag agent-irc.example/hello away-notify ...
+<-- :ergo.test CAP * LS :server-time setname standard-replies userhost-in-names znc.in/self-message
+```
+
+Find `agent-irc.example/hello` in the list. That's chapter 05's deliverable — the cap landed on the wire because we added it to `gencapdefs.py`, regenerated `defs.go`, and rebuilt.
+
+#### Step 2: ask for the cap list yourself
+
+You can re-issue `CAP LS` at any time, even post-registration. Weechat's raw command is `/quote`:
+
+```
+/quote CAP LS 302
+```
+
+You'll see another pair of `CAP * LS` lines come back. (Post-registration the LS doesn't open the trapdoor — you're already past `001`. The server just dumps the current cap list as a reply.)
+
+#### Step 3: REQ our vendor cap manually
+
+```
+/quote CAP REQ :agent-irc.example/hello
+```
+
+The server acknowledges with `CAP * ACK`:
+
+```
+--> CAP REQ :agent-irc.example/hello
+<-- :ergo.test CAP * ACK agent-irc.example/hello
+```
+
+Since our cap is a no-op (deliberately — chapter 05's whole point), nothing observable changes about the session. The plumbing worked; the behavior is empty.
+
+#### Step 4: see what's currently enabled
+
+`CAP LIST` returns the caps that *this session* has opted into:
+
+```
+/quote CAP LIST
+```
+
+You'll see weechat's defaults (the ones it negotiated automatically at connect time) plus `agent-irc.example/hello` (added by step 3).
+
+#### Step 5: try a non-existent cap
+
+```
+/quote CAP REQ :agent-irc.example/does-not-exist
+```
+
+Server NAKs:
+
+```
+<-- :ergo.test CAP * NAK :agent-irc.example/does-not-exist
+```
+
+This is the atomicity rule from the Mental Model section in action: if any cap in a REQ list is unknown, the server NAKs the whole request and changes nothing. Try a mixed REQ to see it:
+
+```
+/quote CAP REQ :agent-irc.example/hello agent-irc.example/does-not-exist
+```
+
+The whole REQ NAKs because one of the two is bad — even though `agent-irc.example/hello` is real and was just ACK'd in step 3.
+
+#### What the equivalent looks like in irssi
+
+Same idea, but irssi's raw command is `/raw` (or `/quote`, depending on your config):
+
+```
+/raw CAP LS 302
+/raw CAP REQ :agent-irc.example/hello
+/raw CAP LIST
+```
+
+irssi's raw output appears in a `/raw on` window — toggle it with `/raw on`.
+
 ## Walkthrough
 
 ### CAP LS 302 holds registration open

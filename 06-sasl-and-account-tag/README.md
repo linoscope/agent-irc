@@ -33,16 +33,18 @@ The `account=alice` tag is **server-attested**. The client did not write it. The
 SASL — the authentication framework — runs *inside* the CAP-LS-held registration window from chapter 05. The whole flow:
 
 ```
-1. CAP LS 302   ←─── trapdoor opens (chapter 05)
-2. NICK / USER
-3. CAP REQ :sasl message-tags account-tag …
-4. CAP * ACK
-5. AUTHENTICATE PLAIN              ┐
-6. AUTHENTICATE +    (server: ok)  │  the SASL exchange.
-7. AUTHENTICATE <base64(creds)>    │  body depends on mechanism;
-8. 900 RPL_LOGGEDIN as alice       │  for PLAIN it's just username + password.
-9. 903 RPL_SASLSUCCESS             ┘
-10. CAP END   ←─── trapdoor closes
+ 1. CAP LS 302                                # trapdoor opens (chapter 05)
+ 2. NICK / USER
+ 3. CAP REQ :sasl message-tags account-tag ...
+ 4. CAP * ACK
+                                              # ----- SASL exchange -----
+ 5. AUTHENTICATE PLAIN                        # body depends on mechanism;
+ 6. AUTHENTICATE +    (server: ok)            # for PLAIN it's just username
+ 7. AUTHENTICATE <base64(creds)>              # + password.
+ 8. 900 RPL_LOGGEDIN as alice
+ 9. 903 RPL_SASLSUCCESS
+                                              # ----- end SASL -----
+10. CAP END                                   # trapdoor closes
 11. 001 RPL_WELCOME
 ```
 
@@ -123,19 +125,22 @@ Notice Alice's message carries `account=Alice`; Bob's has no `account=` tag at a
 The whole point of CAP LS 302 holding registration open (chapter 05) is to give SASL somewhere to run. The flow:
 
 ```
-client → CAP LS 302
-client → NICK alice / USER alice 0 * :Alice
-server → CAP * LS :sasl=PLAIN,EXTERNAL,SCRAM-SHA-256 ...
-client → CAP REQ :sasl message-tags server-time account-tag
-server → CAP * ACK :sasl ...
-                                                       ┐ SASL exchange
-client → AUTHENTICATE PLAIN                            │
-server → AUTHENTICATE +     (server is ready for data) │
-client → AUTHENTICATE <base64(\0user\0pass)>           │
-server → 900 RPL_LOGGEDIN                              │
-server → 903 RPL_SASLSUCCESS                           ┘
-client → CAP END
-server → 001 RPL_WELCOME alice :...
+  C -> CAP LS 302
+  C -> NICK alice / USER alice 0 * :Alice
+  S -> CAP * LS :sasl=PLAIN,EXTERNAL,SCRAM-SHA-256 ...
+  C -> CAP REQ :sasl message-tags server-time account-tag
+  S -> CAP * ACK :sasl ...
+
+  # ----- SASL exchange -----
+  C -> AUTHENTICATE PLAIN
+  S -> AUTHENTICATE +                          # server ready for data
+  C -> AUTHENTICATE <base64(\0user\0pass)>
+  S -> 900 RPL_LOGGEDIN
+  S -> 903 RPL_SASLSUCCESS
+  # ----- end SASL -----
+
+  C -> CAP END
+  S -> 001 RPL_WELCOME alice :...
 ```
 
 The numerics that matter:

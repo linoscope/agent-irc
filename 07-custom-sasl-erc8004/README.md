@@ -158,26 +158,28 @@ PASS: ERC8004 SASL succeeds; signature mismatch is rejected
 ### The 3-step protocol
 
 ```
-                       client                      server
-                       ──────                      ──────
+  Step 1 -- mechanism select
+    C -> AUTHENTICATE ERC8004
+    S -> AUTHENTICATE +
 
-1) mechanism select     AUTHENTICATE ERC8004    →
-                                                ←   AUTHENTICATE +
+  Step 2 -- claim
+    C -> AUTHENTICATE <b64(20-byte address)>
+       (server: stores address, generates 32-byte nonce)
+    S -> AUTHENTICATE <b64(nonce)>
 
-2) claim                AUTHENTICATE <b64(addr)> →     ┐ store addr
-                                                       │ generate nonce
-                                                ←  AUTHENTICATE <b64(nonce)>  ┘ store nonce
+  Step 3 -- prove
+    (client computes:
+       msg  = "agent-irc-sasl-v1\nnonce=" + hex(nonce)
+       hash = keccak256("\x19Ethereum Signed Message:\n" + len(msg) + msg)
+       sig  = personal_sign(hash, privkey)         # 65 bytes
+    )
+    C -> AUTHENTICATE <b64(sig)>
 
-3) prove (response)     ┐ msg = "agent-irc-sasl-v1\nnonce=" + hex(nonce)
-                        │ hash = keccak256("\x19Ethereum Signed Message:\n" + len(msg) + msg)
-                        │ sig = personal_sign(hash, privkey)
-                        │
-                        AUTHENTICATE <b64(sig)>  →     ┐ ecrecover(hash, sig) == addr ?
-                                                       │ if yes:
-                                                ←  900 RPL_LOGGEDIN as 0x<addr-truncated>
-                                                ←  903 RPL_SASLSUCCESS
-                                                       │ if no:
-                                                ←  904 ERR_SASLFAIL
+    (server: ecrecover(hash, sig) == claimed address?)
+
+    on match:                              on mismatch:
+      S -> 900 RPL_LOGGEDIN                  S -> 904 ERR_SASLFAIL
+      S -> 903 RPL_SASLSUCCESS
 ```
 
 ### Why 3 steps and not 2

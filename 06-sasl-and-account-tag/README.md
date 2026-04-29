@@ -118,6 +118,129 @@ Highlights from the wire transcript:
 
 Notice Alice's message carries `account=Alice`; Bob's has no `account=` tag at all.
 
+### Watching it interactively (weechat as alice, nc as bob)
+
+The verify program is fine for asserting correctness. To watch SASL and `account-tag` happen by hand, run two terminals: one weechat as authenticated alice, one `nc` as anonymous bob. Each side sees what the other becomes.
+
+```bash
+# Terminal A — start the fork.
+./start-ergo.sh
+```
+
+#### Step 0: register Alice (one-time setup)
+
+The fork's data dir is wiped on every `start-ergo.sh`, so we need to create Alice's account once at the start of the session. Easiest way: a one-shot `nc`:
+
+```bash
+# Terminal B — register Alice and exit.
+( printf 'CAP LS 302\r\n'
+  printf 'NICK Alice\r\n'
+  printf 'USER Alice 0 * :Alice\r\n'
+  sleep 0.3
+  printf 'CAP REQ :sasl draft/account-registration\r\n'
+  sleep 0.2
+  printf 'REGISTER * * hunter2\r\n'
+  sleep 0.5
+  printf 'QUIT\r\n'
+) | nc -q1 localhost 16672
+```
+
+Look for `REGISTER SUCCESS Alice :Account successfully registered` in the output. Alice's account now exists in the fork's BoltDB until the next `start-ergo.sh` wipes it.
+
+#### Step 1: connect Alice via weechat with SASL
+
+Configure weechat to authenticate as Alice using SASL PLAIN, request the relevant caps, then connect:
+
+```
+weechat
+/server add agentirc localhost/16672 -notls
+/set irc.server.agentirc.sasl_mechanism plain
+/set irc.server.agentirc.sasl_username Alice
+/set irc.server.agentirc.sasl_password hunter2
+/set irc.server.agentirc.capabilities account-tag,server-time,message-tags,echo-message
+/connect agentirc
+```
+
+Press **`Alt+R`** to open the raw IRC buffer. Scroll to the top to see the full SASL handshake:
+
+```
+--> CAP LS 302
+<-- :ergo.test CAP * LS * :... sasl=PLAIN,EXTERNAL,SCRAM-SHA-256,ERC8004 ...
+--> CAP REQ :sasl account-tag server-time message-tags echo-message
+<-- :ergo.test CAP * ACK :sasl account-tag server-time message-tags echo-message
+--> AUTHENTICATE PLAIN
+<-- AUTHENTICATE +                                         # server ready
+--> AUTHENTICATE AEFsaWNlAGh1bnRlcjI=                      # base64("\0Alice\0hunter2")
+<-- :ergo.test 900 Alice Alice!~u@host Alice :You are now logged in as Alice
+<-- :ergo.test 903 Alice :SASL authentication successful
+--> CAP END
+<-- :ergo.test 001 Alice :Welcome ...
+```
+
+The 900/903 numerics are the deliverable of the chapter. Past 903, this session is permanently bound to account `Alice`.
+
+#### Step 2: connect Bob via nc (no auth)
+
+Bob doesn't authenticate. Give him a long-lived nc session:
+
+```bash
+# Terminal C
+nc -C localhost 16672
+NICK bob
+USER bob 0 * :Bob
+                            # wait for 001
+JOIN #demo
+```
+
+#### Step 3: alice joins, sends a message
+
+Back in weechat:
+
+```
+/join #demo
+hi everyone
+```
+
+Look at Bob's terminal C. He sees:
+
+```
+@account=Alice;msgid=...;time=2026-04-29T...   :Alice!~u@... PRIVMSG #demo :hi everyone
+```
+
+The `@account=Alice` tag is **server-stamped**. Alice didn't write it; the server added it because her session SASL'd as Alice. **This is the entire deliverable of the chapter.**
+
+#### Step 4: bob sends a message
+
+In Bob's nc:
+
+```
+PRIVMSG #demo :hi back
+```
+
+In weechat's raw buffer (`Alt+R`), Alice's view of bob's message:
+
+```
+@msgid=...;time=2026-04-29T...   :bob!~u@... PRIVMSG #demo :hi back
+```
+
+**No `account=` tag at all.** Bob is anonymous; the server has nothing authoritative to stamp.
+
+That asymmetry — alice's messages are authenticated-attributed, bob's aren't — is what makes `account-tag` the *only* honest identity signal. Authorization on the receiving side keys on `account=`, never on the nick part of the prefix.
+
+#### Step 5 (bonus): alice tries to change nick
+
+```
+/nick alice2
+```
+
+Ergo (with `force-nick-equals-account` on, the default) refuses:
+
+```
+<-- :ergo.test 432 Alice alice2 :Erroneous nickname: nick is reserved for an account
+```
+
+Authenticated sessions can't escape their account name. Chapter 09 makes this property load-bearing for ERC-8004 binding.
+
 ## Walkthrough
 
 ### SASL inside the CAP-LS-held window

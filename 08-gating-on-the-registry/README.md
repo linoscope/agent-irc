@@ -4,6 +4,114 @@ Chapter 07 stopped at "any wallet keypair grants access." That's a development s
 
 After this chapter, `agent-irc-ergo` makes a real `eth_call` to a registry contract on every successful SASL signature. Unregistered addresses hit `904 ERR_SASLFAIL` with a clear "address not in registry" message.
 
+## Mental model: adding an external authority
+
+Chapter 07 had a self-contained auth check:
+
+```
+auth(address, sig, nonce):
+    return ecrecover(sig, hash(nonce)) == address
+```
+
+Pure crypto. No network, no state outside the SASL handler. If `ecrecover` returns the claimed address, the signature is real, end of story.
+
+Chapter 08 adds a second condition that requires asking *somewhere else*:
+
+```
+auth(address, sig, nonce):
+    if ecrecover(sig, hash(nonce)) != address: return FAIL
+    name = registry.nameOf(address)              ← ←  on-chain RPC
+    if name == "":                  return FAIL  ←     (returned empty = not registered)
+    return SUCCESS
+```
+
+The registry is the new authority. It's a smart contract on Base mainnet (or anvil for dev) that stores `(address, name)` pairs and can be queried by anyone. The auth flow now requires *both* signature validity *and* membership in this contract.
+
+### The trust diagram now
+
+```
+   client (alice's agent)                                     irc server                                     base RPC                              registry contract
+   ────                                                       ────                                            ────                                  ────
+   |                                                          |                                              |                                     |
+   | AUTHENTICATE ERC8004                                     |                                              |                                     |
+   |─────────────────────────────────────────────────────────►|                                              |                                     |
+   |                                            [3-step SASL handshake — chapter 07]                                                                |
+   |◄─────────────────────────────────────────────────────────| sig verified ✓                               |                                     |
+   |                                                          |                                              |                                     |
+   |                                                          | eth_call nameOf(alice)                       |                                     |
+   |                                                          |─────────────────────────────────────────────►|                                     |
+   |                                                          |                                              | call read-only on contract storage  |
+   |                                                          |                                              |────────────────────────────────────►|
+   |                                                          |                                              |◄──────────────────────────────────── |  returns "alice-bot"
+   |                                                          |◄─────────────────────────────────────────────|                                     |
+   |                                                          |                                              |                                     |
+   |◄─────────────────────────────────────────────────────────| 903 RPL_SASLSUCCESS                          |                                     |
+   |                                                          |                                              |                                     |
+```
+
+The IRC server becomes a *client* of the chain. Every successful SASL attempt produces one read-only `eth_call`. The contract is never written to during auth — writes happen out-of-band when an agent registers themselves on-chain.
+
+### What the contract holds
+
+Our `AgentRegistry.sol` is the simplest ERC-8004-compatible Identity Registry:
+
+```solidity
+mapping(uint256 => Agent)   agents;       // agentId → {wallet, name}
+mapping(address => uint256) agentIdOf;    // wallet → agentId  (reverse lookup we maintain)
+mapping(string  => uint256) nameIndex;    // name → agentId    (uniqueness)
+
+function register(string calldata name) external returns (uint256 agentId);
+function setName(string calldata newName) external;
+function remove() external;
+function nameOf(address wallet) external view returns (string memory);   // ← what the SASL handler queries
+```
+
+Three things to notice:
+
+1. **The reverse mapping is the load-bearing one.** `nameOf(address)` is what the SASL handler calls. ERC-8004's full spec keys on `agentId` (an ERC-721 token ID) and uses `getAgentWallet(agentId)` to go forwards. We maintain a manual reverse for fast lookup.
+2. **`name` is a free string.** ERC-8004 doesn't enforce IRC-compatible naming — chapter 09 handles validation on the IRC side.
+3. **Three lifecycle events.** `register`, `setName`, `remove`. Chapter 10's mutation watcher polls for changes; production code would subscribe to event logs instead.
+
+### Where to deploy in production
+
+For local dev (this chapter): `anvil` on `localhost:8545`. Fast, free, deterministic.
+
+For production: **Base mainnet** (chain id 8453). Reasons:
+
+- **Cheap.** ~$0.001 per registration write at typical L2 gas prices.
+- **Mature.** Same EVM as Ethereum, OP Stack, well-supported by every tool we use.
+- **Fast.** ~2-second blocks; `nameOf` reads return in well under a second from a healthy RPC.
+
+Switching from anvil to Base is one config change in `ircd.yaml`:
+
+```diff
+ accounts:
+     erc8004:
+-        rpc-url: "http://localhost:8545"
+-        registry-address: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+-        chain-id: 31337
++        rpc-url: "https://mainnet.base.org"
++        registry-address: "0x..."   # your deployed contract
++        chain-id: 8453
+         cache-ttl: 60s
+```
+
+The Go side doesn't change. `ethclient.Dial` works the same against either endpoint.
+
+### Failure modes a network call introduces
+
+Once auth depends on a network call, three new failure cases appear:
+
+1. **RPC slow.** A 30-second hang during SASL means the client's connection times out. Mitigation: per-call timeout (we use 5s), fail closed on timeout.
+2. **RPC down.** Every SASL attempt fails. Mitigation: cache positive results for `cache-ttl` so transient outages don't lock everyone out.
+3. **RPC lying.** A compromised endpoint can return arbitrary names or claim addresses are unregistered. Mitigation: trusted RPC operator, multi-RPC quorum, light-client verification (out of scope for chapter 08; see chapter 08's "trust assumptions" section).
+
+The default config (`cache-ttl: 0`) is correct-but-expensive. Production should set this to ~60s.
+
+### What chapter 08 leaves for chapter 09
+
+The handler in chapter 08 still uses `AccountNameForAddress(addr)` (truncated hex) as the IRC account name. The registry-returned name is read from the chain *but discarded* — we only use it to check membership. Chapter 09 plumbs that name through to actually become the IRC nick.
+
 ## What you'll learn
 
 - How to deploy a minimal ERC-8004-compatible Identity Registry to a local EVM (anvil) and to Base mainnet for production.

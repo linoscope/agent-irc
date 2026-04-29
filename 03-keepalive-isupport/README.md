@@ -2,6 +2,101 @@
 
 The chapter-02 server worked, but no real IRC client would stay connected to it for long. It would never know if the client was idle, never tell the client what it can and can't do, and would silently mishandle nicknames containing `[`, `]`, `\`, or `~`. Chapter 03 closes those gaps so that `weechat`, `irssi`, and `mIRC` all behave correctly.
 
+## Mental model: three things real clients expect
+
+A polished IRC client (weechat, irssi, mIRC) talks to the chapter-02 server and behaves *almost* normally — until one of three things happens:
+
+1. **The connection sits idle for two minutes.** A real server would have sent a `PING` to check liveness; ours doesn't. Some clients tolerate this; others assume the server died and reconnect.
+2. **The client wants to know "what flavor of IRC is this?"** Ergo, Solanum, UnrealIRCd, mIRC's built-in server — they all behave slightly differently. Real servers tell clients up-front, via a numeric called `005 RPL_ISUPPORT`. Ours doesn't, so the client falls back to RFC 1459 defaults that may or may not be right.
+3. **A user has a nick like `Alice[bot]`.** Per RFC 1459 §2.2, IRC's casemapping says `Alice[bot]` and `alice{bot}` are the *same* nick. Our chapter-02 server uses ASCII `strings.ToLower`, which says they're different. Chaos ensues.
+
+Chapter 03 fixes all three. Each is a small change but they cover three completely different concerns: **liveness**, **capability discovery**, and **identity equivalence**.
+
+### 1. Idle detection: PING / PONG
+
+```
+                client                                   server
+                ───                                       ───
+                                          (silence for IdleTimeout = 120s)
+                                                  │
+                                                  ▼
+                                            send "PING :sometoken"
+        receive "PING :sometoken"  ◄────────
+                                          (start a second IdleTimeout window)
+        send "PONG :sometoken"     ────────►
+                                            reset idle clock
+                                                  │
+                                                  ▼
+                                          (silence for another 120s)
+                                                  │
+                                                  ▼
+                                            send "PING :anothertoken"
+                  (client crashed; never responds)
+                                                  │
+                                                  ▼
+                                          (silence for ANOTHER 120s)
+                                                  │
+                                                  ▼
+                                            close TCP, log "ping timeout"
+```
+
+Server-initiated, deadline-based, asymmetric. The client doesn't have to ping the server — though defensive ones do, since TCP can quietly die through NAT boxes.
+
+### 2. Capability discovery: numeric 005
+
+Right after `001 RPL_WELCOME`, a real server sprays one or more `005` lines:
+
+```
+:irc.example 005 alice NETWORK=AgentIRC CASEMAPPING=rfc1459 CHANTYPES=# PREFIX=(qaohv)~&@%+ NICKLEN=30 CHANNELLEN=64 :are supported by this server
+                       └────────────────────────────────────── KEY=VALUE tokens, terminated by ───────────────────────────────────────┘
+```
+
+Each `KEY=VALUE` token is something the client can ask "what does this server allow me to do?" Examples:
+
+| Token | What clients use it for |
+|---|---|
+| `NETWORK=AgentIRC` | Display: "Connected to AgentIRC" |
+| `CASEMAPPING=rfc1459` | Picks the right nick-comparison function locally |
+| `CHANTYPES=#` | Tells the client `#name` is a channel; `&name` is not (on this server) |
+| `PREFIX=(qaohv)~&@%+` | The op/voice mode-to-symbol map |
+| `NICKLEN=30` | Reject too-long nicks before sending |
+
+Without 005, the client falls back to RFC 1459 defaults, which on a modern server are wrong about half the time. This is why every modern client emits `CAP LS` immediately on connect — to find out what the server *actually* supports.
+
+### 3. Casemapping: the Finnish quirk
+
+The single sentence in RFC 1459 §2.2 that breaks every modern parser:
+
+> Because of IRC's scandanavian origin, the characters `{}|` are considered to be the lower case equivalents of the characters `[]\`, respectively.
+
+Concretely:
+
+```
+RFC 1459 lowercase folding:
+   A → a    [ → {    \ → |    ] → }    ~ → ^
+
+Examples that fold to the same casefolded form:
+   "Foo[bar]"  ←→  "foo{bar}"
+   "Hello~"    ←→  "hello^"
+   "ALICE\bot" ←→  "alice|bot"
+```
+
+ISO-646-FI (Finnish ASCII) put `Ä Ö Å` where US-ASCII puts `[ \ ]`, so when an IRC user typed lowercase, those characters folded to `{ | }`. The folding rule remains in the protocol forever as backwards compat.
+
+If you use plain `strings.ToLower`:
+
+- An attacker registers `alice`. The legitimate user `Alice[bot]` then collides — but with `ToLower` they hash to `alice[bot]`, while ChanServ records have `alice{bot}`. The two halves of the system disagree, silently. Nobody throws an error; auth just fails in confusing ways.
+
+The chapter-03 server implements proper rfc1459 casefold. Chapter 03 also documents that real Ergo deliberately uses `CASEMAPPING=ascii` instead — modern clients support either, and ascii is less surprising.
+
+### What chapter 03 deliberately skips
+
+- **Anti-flood / fakelag**: every command costs server-side "lag credits"; too-fast clients get queued or killed. Real public networks live and die on this. We mention it; we don't implement it.
+- **Connection limits**: per-IP, per-class. Vital in production; out of scope.
+- **TLS, IRCv3 caps, SASL** — chapters 04+.
+
+By the end of this chapter, the toy server from chapter 02 is *compatible* with `weechat`, `irssi`, and most older mIRC builds. They connect, see the right metadata, stay alive, and don't get confused about who's who.
+
 ## What you'll learn
 
 - The PING/PONG keepalive contract: server-initiated, deadline-driven, asymmetric.

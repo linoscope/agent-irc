@@ -4,6 +4,81 @@ The first modification to our Ergo fork. We add a no-op vendor capability — `a
 
 This is the warm-up. The mechanism we exercise here — the IRCv3 capability table — is exactly where chapters 07–10 hook in.
 
+## Mental model: how IRC adds features without breaking anyone
+
+IRC has been deployed for 30+ years. There are clients still in use that were written in 2003. There are servers still running C code from 1998. Adding new features (account-tag, message IDs, server-time, SASL, message tags, multiline messages, replies, edits, deletions, …) without breaking that installed base is the puzzle CAP solves.
+
+The trick: **clients opt in.** A modern feature is invisible to a client that doesn't know to ask for it; visible the moment they do. The server advertises what it knows; the client requests the subset it understands; both sides agree before any new behavior turns on.
+
+### Where CAP lives in the connection lifecycle
+
+Recall chapter 01's registration handshake: `NICK` + `USER` → `001 RPL_WELCOME`. CAP wedges itself *into* that handshake by holding it open:
+
+```
+client → CAP LS 302         ┐  trapdoor opens — server now knows
+                            │  registration is held while caps are negotiated
+client → NICK alice         │
+client → USER alice 0 * :…  │
+                            │  (server must NOT emit 001 yet)
+server → CAP * LS :cap1 cap2 cap3 …       ← here's everything I support
+                            │
+client → CAP REQ :cap1 cap2               ← give me these (atomic)
+                            │
+server → CAP * ACK :cap1 cap2             ← granted
+                            │
+                            │  (auth, configuration, anything that
+                            │   needs to happen pre-001 goes here —
+                            │   chapter 06's SASL lives in this window)
+                            │
+client → CAP END            ┘  trapdoor closes
+                            
+server → 001 alice :Welcome…    registration completes normally
+```
+
+The `302` is the **CAP version** the client claims to speak. Version 302 is what enables continuation lines (`CAP * LS *` followed by another `CAP * LS`), capability values (`sasl=PLAIN,EXTERNAL`), and `cap-notify` for changes after registration. Without `302`, you get the older one-line dump and the server breaks gracefully if it overflows.
+
+### What an "advertised capability" actually looks like
+
+A capability is a *named string* like `account-tag`, `multi-prefix`, or `sasl`. Names follow conventions:
+
+| Form | Meaning | Example |
+|---|---|---|
+| Plain name | Standard IRCv3 capability | `account-tag`, `server-time`, `batch` |
+| `draft/<name>` | On the IRCv3 standardization track but not finalized | `draft/chathistory`, `draft/multiline` |
+| `<dotted-domain>/<name>` | Vendor-specific; namespaced by a domain you control | `znc.in/self-message`, `ergo.chat/nope`, `agent-irc.example/hello` |
+
+A capability can also carry a *value*: `sasl=PLAIN,EXTERNAL,SCRAM-SHA-256` tells the client which SASL mechanisms are available. Plain caps have no value.
+
+### What chapter 05 changes
+
+The chapter-04 Ergo fork has all the standard caps. Chapter 05 adds **one new vendor cap**:
+
+- **Identifier in Go**: `caps.AgentIRCHello`
+- **Wire name**: `agent-irc.example/hello`
+- **Behavior**: nothing yet. It just appears in `CAP LS 302` and accepts `CAP REQ`.
+
+The point is not the cap itself — it's the *mechanism*. Once you've seen how a capability gets defined, advertised, requested, and acknowledged, you've seen the entire IRCv3 extension surface. Chapter 07's `ERC8004` SASL mechanism uses the exact same machinery, just with a meaningful payload.
+
+### Why CAP is interesting beyond IRC
+
+Every protocol that has to evolve under an installed base hits the same problem. HTTP/2 settles for `Upgrade:` headers and content negotiation. TLS uses extensions in the ClientHello. IMAP has `CAPABILITY`. SSH has `kex-algorithms`. They all do roughly the same thing — "advertise what you have, let the peer pick what they understand, both sides commit."
+
+IRC's CAP is unusually clean for two reasons:
+
+1. **Asymmetric.** The server lists; the client picks. Not "negotiate." This avoids the combinatorial explosion of "well, I'll do A if you do B unless C" that plagues TLS extension dependencies.
+2. **Atomic REQ.** A client asks for a *set* of caps; the server enables all of them or none. No partial commits. Half-enabled feature sets cause more bugs than missing features.
+
+### Vocabulary new in this chapter
+
+| Term | What |
+|---|---|
+| **Capability** (or "cap") | A named, optional protocol feature both sides opt into |
+| **CAP LS / REQ / ACK / NAK / END** | The CAP subcommand verbs |
+| **CAP version** | The `302` in `CAP LS 302`. What CAP machinery the client supports |
+| **Vendor cap** | A non-standard, namespaced cap (`vendor.example/feature`) |
+| **Draft cap** | A cap on the standardization track but not finalized (`draft/...`) |
+| **Continuation line** | A CAP LS line ending with `*` indicating more is coming |
+
 ## What you'll learn
 
 - The `CAP LS / CAP REQ / CAP ACK / CAP END` handshake and how it holds registration open.

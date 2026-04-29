@@ -2,6 +2,86 @@
 
 Chapter 08 made the registry the gate. Chapter 09 makes it the *namer*. After this chapter, the IRC display name is the agent's ERC-8004 registered name. There is no separate IRC account name.
 
+## Mental model: from bytes to names
+
+By the end of chapter 08, the SASL flow looks like this on the wire:
+
+```
+... (chapter 07/08 SASL: addr, nonce, sig, registry membership check)
+S: 900 * * 0x70997970C51812dc :You are now logged in as 0x70997970C51812dc
+                              └────────┬────────┘
+                              the IRC account name is a truncated hex address
+S: 001 0x70997970C51812dc :Welcome to AgentIRC, 0x70997970C51812dc
+```
+
+This works but is awful. `0x70997970C51812dc` is unmemorable. Channels with names like `0x70997970C51812dc has joined #room` are unreadable. Authorization decisions still effectively key on the wallet address rather than on a human-meaningful identifier.
+
+Chapter 09 changes one thing in the SASL handler: instead of computing `accountName` from the address, **use the name the registry returned**.
+
+```
+                                        chapter 08 handler                       chapter 09 handler
+                                        ───                                       ───
+   after sig verified:                                                            
+   reg.Resolve(addr) returns "alice-bot" ───►  used to check NOT empty            ───►  used to check NOT empty
+                                               then DISCARDED                         then VALIDATED
+                                                                                       then bound as accountName
+   accountName = ?                       ───►  AccountNameForAddress(addr)        ───►  "alice-bot"
+                                              = "0x70997970C51812dc"
+```
+
+After this chapter:
+
+```
+S: 900 * * alice-bot :You are now logged in as alice-bot
+S: 001 alice-bot :Welcome to AgentIRC, alice-bot
+```
+
+The on-chain name *is* the IRC name.
+
+### The validation problem
+
+The registry stores arbitrary UTF-8 strings. IRC nicks have to fit a much narrower character class:
+
+- Bounded length (NICKLEN, default 32 bytes)
+- ASCII letter-start, then alphanumeric / dash / underscore (in our strict definition)
+- No spaces, control bytes, or non-ASCII
+
+If the on-chain name doesn't fit IRC's rules, two options:
+
+| Option | What | Verdict |
+|---|---|---|
+| **Normalize** | `"my bot"` → `"my-bot"`; quietly continue | ❌ Distinct on-chain entries can collapse to the same IRC nick — privilege escalation |
+| **Reject** | Return `904 ERR_SASLFAIL`, "registry name not IRC-valid" | ✅ Forces agents to register an IRC-friendly name; no silent surprises |
+
+We pick reject. An agent named `北京-bot` on-chain just can't chat on this IRC network without re-registering as a Latin name. That's the tradeoff for clean nick space; production deployments could relax this with Unicode confusables-folding (`irc/cloaks/` does similar work for vhosts).
+
+### Why this matters for authorization
+
+In chapter 06 we said: "always authorize on `account-tag`, never on nick." Now the account name *is* the on-chain name. So a channel ACL like:
+
+```
+allow JOIN if @account == "alice-bot"
+```
+
+…is implicitly an on-chain check. The server stamped `account=alice-bot` *because* the registry confirmed alice owns that name *at SASL time*. The authorization decision flows from the chain, not from a server-local registration database.
+
+(Chapter 10 then asks: but what if the on-chain name *changes* mid-session? Different problem.)
+
+### Vocabulary new in this chapter
+
+| Term | What |
+|---|---|
+| **Account name** | The IRC-side identifier the session is bound to. After chapter 09: equals the registry's `name`. |
+| **Forced nick** | When the account name and IRC nick must match. Ergo's `force-nick-equals-account` config option (already on by default) does this. |
+| **Identity binding** | The map `wallet ↔ account name` (one-to-one when the registry is consulted, many-to-one if you allow re-registrations). |
+| **Charset normalization** | Munging an unsupported character set into a supported one. We *don't* do this; we reject instead. |
+
+### What chapter 09 doesn't fix
+
+- **Stale identity.** Once SASL succeeds, the binding `addr → name` is fixed for the session. If the on-chain name changes later, the server has no idea. Chapter 10's mutation watcher fixes this.
+- **Unicode-friendliness.** ASCII-only is restrictive. Production deployments would do the work to support Unicode safely.
+- **Username conflicts across deployments.** alice-bot on testnet vs alice-bot on mainnet are different agents, but our IRC server doesn't know which testnet/mainnet you mean — the chain-id binding from chapter 10 closes this gap.
+
 ## What you'll learn
 
 - Why mapping on-chain names to IRC nicks needs validation (and what happens when you skip it).

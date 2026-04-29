@@ -7,6 +7,101 @@ The closing chapter. We tighten two threats the chapter-07/08/09 designs left op
 
 After this chapter the substrate is *coherent*: at every moment, a session's IRC identity matches the agent's on-chain identity, or the session is being terminated.
 
+## Mental model: authentication is a moment, authority is a duration
+
+Chapters 06–09 closed the front door: at the moment of SASL, we know who you are and that you're allowed in.
+
+Two things that can still go wrong:
+
+| Problem | When it happens | Chapter-09 server does what? |
+|---|---|---|
+| **Cross-context replay.** A signature alice produced for `irc.test-net.com` is captured and re-presented to `irc.prod.com` (or against a different chain id). | At any future SASL attempt to a different server. | Accepts it. The signed body only contained the nonce; nothing tied it to *which* deployment. |
+| **Stale authority.** Alice authenticates on Monday. On Tuesday her on-chain entry is renamed (or removed). On Wednesday her IRC session is still chatting as `alice-bot`. | Continuously, after any successful SASL. | Doesn't notice. The server resolved the registry once, at SASL time, and never looks again. |
+
+The first is a **static** problem about how the credential is constructed. The fix is to bind the signed message to the deployment context.
+
+The second is a **temporal** problem about what happens *after* auth succeeds. The fix is to keep checking.
+
+### Fix 1: bind the signed message to its context
+
+Chapter-07 body:
+
+```
+agent-irc-sasl-v1
+nonce=<hex>
+```
+
+Chapter-10 body:
+
+```
+agent-irc-sasl-v1
+chain=<chain_id>
+server=<server_name>
+nonce=<hex>
+```
+
+Two new lines. The `chain_id` separates testnet (chain 84532) from mainnet (chain 8453). The `server_name` separates `irc.foo.com` from `irc.bar.com`. A signature produced for one (chain, server) pair cannot be re-presented to a different one — `ecrecover` will return a different address because the hashed bytes differ.
+
+This is **EIP-712's domain separator pattern** in spirit, just expressed in a flat-text EIP-191 envelope. Chapter 10 sticks with EIP-191 for simplicity (no ABI encoding); production should consider EIP-712 for the structured-rendering UX in wallets.
+
+### Fix 2: re-check the authority periodically
+
+A background goroutine in the IRC server walks every authenticated agent-irc client every N seconds (default 30s, 1s in tests) and asks the registry "does this address still resolve to the same name?"
+
+```
+                                    server                              registry
+                                    ───                                  ───
+                  every 30s:        for each authenticated agent c:
+                                                                   nameOf(c.agentIRCAddr)?
+                                                                  ─────────────────────────►
+                                                                                              registered?
+                                                                  ◄─────────────────────────
+                                                                  
+                                    if returned "" (removed):     KILL session
+                                    if returned different name:   KILL session
+                                    if returned same name:        no-op
+```
+
+KILL here means Ergo's `killClients` path: `Logout` + `Quit` + `destroy`. Forces the wire close even for always-on agents whose normal `Quit` would persist. The agent receives:
+
+```
+:alice-bot!~u@host.irc QUIT :You are no longer authorized to be on this server
+ERROR :You are no longer authorized to be on this server
+(socket closes)
+```
+
+…and can reconnect under their new name (or fail to, if they've been deregistered).
+
+### Why poll and not subscribe
+
+Polling is the lazy choice. The "right" choice is to subscribe to the registry's `AgentRenamed` and `AgentRemoved` events via WebSocket-RPC `eth_subscribe`. Tradeoff:
+
+| | Polling (chapter 10) | Event subscription |
+|---|---|---|
+| Latency to detection | Up to `interval` (30s default) | ~one block (~2s on Base) |
+| RPC cost | O(connected agents) per interval | One long-lived connection |
+| Reorg correctness | Self-healing — next poll catches up | Have to handle reverted events |
+| Implementation | ~80 lines | Substantially more |
+
+For a tutorial we polled. For ~1000+ agents you'd want event subscription. The mechanism (compare cached state vs current state, KILL on mismatch) is identical.
+
+### What's left after chapter 10
+
+The agent-irc threat model after chapter 10:
+
+✅ Wallet keypair == identity, with chain-bound signatures
+✅ Server-attested account-tag flowing on every wire message
+✅ On-chain registry as the source of truth, polled for mutations
+✅ Cross-deployment replay isolation via signed `chain` + `server` fields
+
+❌ Wallet compromise (mitigation: contract-level rotation)
+❌ Malicious RPC (mitigation: multi-RPC quorum, self-hosted node)
+❌ Compromised IRC server operator (mitigation: TEE deployment — see [dstack-examples](https://github.com/Dstack-TEE/dstack-examples))
+❌ Channel-level ACLs gating on registry roles (future work)
+❌ Rate limits keyed on agent ID (future work)
+
+The chapter's closing summary in this README walks through these explicitly.
+
 ## What you'll learn
 
 - The SIWE/EIP-191 body extension pattern: bind a signature to the *context* of the auth attempt, not just the freshness.

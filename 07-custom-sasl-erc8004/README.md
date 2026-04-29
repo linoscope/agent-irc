@@ -4,6 +4,101 @@ The chapter where `agent-irc-ergo` becomes meaningfully different from upstream 
 
 After this chapter, **wallet keypair = IRC identity**. No passwords, no certs. The wallet *is* the credential.
 
+## Mental model: a wallet is a credential
+
+Chapter 06 ran SASL PLAIN: client sends `\0username\0password`, server checks bcrypt, success. The credential is a *shared secret* the user picked, the server stored, and both sides can compare.
+
+Chapter 07 swaps the credential type. Instead of a password, the credential is **the ability to produce a signature with a specific Ethereum private key**. The server never holds the secret — it can only check signatures.
+
+| | SASL PLAIN | SASL ERC8004 (chapter 07) |
+|---|---|---|
+| Credential | password | wallet private key |
+| What the client sends | `\0user\0password` | `address` then `signature(nonce)` |
+| What the server stores | bcrypt hash of password | nothing; verifies via `ecrecover` |
+| What server compromise leaks | every password | nothing — server can observe but not impersonate |
+| Who picks the identity | user (during register) | the chain (each address is a fixed, derived identity) |
+| Rotation | password reset | new wallet, on-chain `setAgentWallet` |
+
+The mechanism's wire shape is the same standard SASL: `AUTHENTICATE ERC8004` → server `+`, client data, server response, client data, … → `903 RPL_SASLSUCCESS`. We just put different bytes in the data fields.
+
+### Why a 3-step exchange (and not 2)
+
+The simplest possible challenge-response is:
+
+```
+client signs nonce → sends sig
+server verifies
+```
+
+But where does the nonce come from? If the *client* picks it, an attacker who once observed alice's signature can replay it forever. The nonce **must** be server-issued, which forces the protocol to be at least:
+
+```
+server: here's a nonce
+client: signs nonce, sends sig
+server: verifies
+```
+
+…and that's two messages from the server before the client can sign anything. Plus we need the client to tell the server *which address* they're claiming to be (so the server knows what to verify against). So the natural shape is three steps:
+
+```
+                       client                              server
+                       ───                                  ───
+                                                ─►  AUTHENTICATE +
+   step 1: claim addr  ─►   AUTHENTICATE <b64(20-byte address)>
+                                              [server stores addr]
+                                              [server generates nonce]
+                                                ─►  AUTHENTICATE <b64(32-byte nonce)>
+   step 2: sign + send sig ─►  AUTHENTICATE <b64(65-byte sig)>
+                                              [ecrecover(sig) ?= addr]
+                                                ─►  900 RPL_LOGGEDIN
+                                                ─►  903 RPL_SASLSUCCESS
+```
+
+This mirrors how SCRAM-SHA-256 also runs as a multi-step SASL exchange in Ergo (`scramConv` in `irc/handlers.go`). The dispatch machinery already supports multi-step flows — we just need to plug in our handler.
+
+### What gets signed: the EIP-191 envelope
+
+The client doesn't sign the raw nonce. They sign the keccak256 hash of:
+
+```
+\x19Ethereum Signed Message:\n<decimal length><body>
+```
+
+…where `body` is `agent-irc-sasl-v1\nnonce=<hex>`. This is **EIP-191 personal_sign**, the standard envelope every Ethereum wallet exposes (MetaMask, hardware wallets, Frame, etc.) for signing app-level messages.
+
+Why bother:
+
+1. **Wallets render it nicely.** When MetaMask sees an EIP-191 message, it shows the user a "Sign this message" dialog with the readable body. Without EIP-191, you'd be asking them to sign opaque hashes — which most wallets refuse for safety reasons.
+2. **The `\x19` prefix is non-ASCII**, which guarantees the signed bytes can never collide with a valid Ethereum transaction's RLP encoding. So a SASL signature can't be replayed as an on-chain transaction. This is the primary security justification: it isolates the SASL credential from the wallet's transaction-signing authority.
+
+EIP-712 (typed structured data) is the modern alternative; chapter 10 discusses why we'd switch to it for production.
+
+### Where this lands in the fork
+
+The chapter modifies six places in `~/workspace/agent-irc-ergo`:
+
+```
+irc/agentirc/sasl.go          (new)  — crypto: nonce, EIP-191 hash, ecrecover
+irc/agentirc/sasl_test.go     (new)  — unit tests
+irc/client.go                          — saslStatus.agentIRC field for per-conn state
+irc/handlers.go                        — authERC8004Handler (~50 lines)
+irc/accounts.go                        — register "ERC8004" in EnabledSaslMechanisms
+irc/config.go                          — advertise it in the SASL cap value
+go.mod / vendor/                       — add github.com/ethereum/go-ethereum
+```
+
+About 200 lines of new code, 4 lines of changes to existing files, plus the go-ethereum vendor.
+
+### What chapter 07 still leaves open
+
+Three things, addressed in chapters 08-10:
+
+1. **Any wallet works.** A keypair generated 200ms before the connection authenticates fine. There's no notion of "registered agent" — that's chapter 08.
+2. **Account name is just the truncated address.** `0xC502FEA9b3477878` is unmemorable. Chapter 09 replaces this with the on-chain registered name.
+3. **Nonce isn't bound to the deployment.** A signature for one server-id could replay against another. Chapter 10 binds the body to `(chain_id, server_name, nonce)`.
+
+By the end of chapter 07: `weechat` (with a wallet plugin) or our verify program produces a valid signature, and Ergo accepts it without ever storing a password.
+
 ## What you'll learn
 
 - How to add a new SASL mechanism to Ergo's `EnabledSaslMechanisms` table.

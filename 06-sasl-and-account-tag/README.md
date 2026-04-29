@@ -2,6 +2,77 @@
 
 The chapter where authenticated identity becomes part of the wire format. After this chapter, every PRIVMSG from an authenticated client carries `@account=<name>` as an IRCv3 message tag — and chapters 07–10 build their authorization on that tag.
 
+## Mental model: from nick to identity
+
+Chapters 01–05 had a problem: when bob receives `:alice!alice@host PRIVMSG #room :hi`, who actually said it?
+
+The honest answer is: *we don't know*. Three substrings claim to be identity, none are reliable:
+
+| Where | What it is | Trustable? |
+|---|---|---|
+| `alice` (the nick) | The display name alice typed in `NICK alice` | ❌ Anyone can set NICK. After alice disconnects, anyone can grab `alice`. |
+| `alice` (the user, middle of `nick!user@host`) | What alice typed in `USER alice 0 * :…` | ❌ Client-controlled. Forged routinely by bots. |
+| `host` | alice's IP address (or a cloak) | ⚠️ Server-controlled and reliable as a network identifier, but not as a person identifier — IPs are shared, NATed, rotated. |
+
+So pre-chapter-06 IRC has **no honest answer** to "who is this message from?" beyond "the network endpoint that sent it." Authorization decisions ("alice is op of #room", "only alice can join #alice-private") have to fall back on heuristics: maintain a session whitelist, key on hostname, etc. All workarounds.
+
+### The fix: a verified account name, on every message
+
+Chapter 06 introduces a fourth string into every relayed message:
+
+```
+@account=alice;msgid=...;time=… :alice!alice@host PRIVMSG #room :hi
+└──────┬──────┘                                                   
+   server-stamped IRCv3 message tag                                
+```
+
+The `account=alice` tag is **server-attested**. The client did not write it. The server stamped it onto the message *because* this session previously authenticated as account `alice` via SASL. If alice quits and someone else NICK-grabs `alice`, *that session has no SASL state*, so the server doesn't stamp `account=alice`. The tag is unspoofable from the client side.
+
+### How does the session "previously authenticate"?
+
+SASL — the authentication framework — runs *inside* the CAP-LS-held registration window from chapter 05. The whole flow:
+
+```
+1. CAP LS 302   ←─── trapdoor opens (chapter 05)
+2. NICK / USER
+3. CAP REQ :sasl message-tags account-tag …
+4. CAP * ACK
+5. AUTHENTICATE PLAIN              ┐
+6. AUTHENTICATE +    (server: ok)  │  the SASL exchange.
+7. AUTHENTICATE <base64(creds)>    │  body depends on mechanism;
+8. 900 RPL_LOGGEDIN as alice       │  for PLAIN it's just username + password.
+9. 903 RPL_SASLSUCCESS             ┘
+10. CAP END   ←─── trapdoor closes
+11. 001 RPL_WELCOME
+```
+
+After step 9, the session is permanently bound to account `alice`. Every message it sends thereafter carries `account=alice`. If SASL fails (904), no binding happens; the session continues as anonymous, and its messages carry no `account=` tag.
+
+### The three mechanisms (and which we'll use)
+
+| Mechanism | Credential | Where to use |
+|---|---|---|
+| **PLAIN** | username + password, base64'd | Behind TLS only. Simplest. We use this in chapter 06 to demonstrate the flow. |
+| **EXTERNAL** | nothing — server uses TLS client cert | Identity follows a keypair via cert. Cleaner cryptographically; couples to cert lifecycle. |
+| **SCRAM-SHA-256** | challenge/response over a salted hash | Defense against passive observers without TLS. Server never sees the password. |
+
+For agent-irc (chapter 07+), **none of these are quite right** — agents have wallet keypairs, not passwords or X.509 certs. So we'll define our own mechanism, `ERC8004`, with the same wire shape as the standard ones. The dispatch machinery, the 900/903/904 numerics, the `account-tag` plumbing — all of that is what chapter 06 makes us internalize.
+
+### Where account-tag shows up
+
+Once SASL succeeds and the client has the `account-tag` capability, the server stamps the `account=<name>` tag on **every** message it relays from this session:
+
+- `PRIVMSG`, `NOTICE`, `TAGMSG` — chat
+- `JOIN`, `PART`, `QUIT`, `KICK`, `INVITE` — channel state changes
+- `NICK`, `MODE`, `AWAY`, `TOPIC` — user/channel state
+- `CHATHISTORY` replays — even past events
+
+Authorization on the receiving side keys on the tag. A bot that gives ops based on "the joiner's nick" is hijackable; a bot that gives ops based on `account=` is not.
+
+### What chapter 06 doesn't change in the fork
+
+This chapter is a walkthrough, not a modification. Ergo already implements all of this. The chapter's `verify` program drives Ergo through a 4-phase sequence (REGISTER → SASL PLAIN → anonymous client → observe `account-tag`), and we read the wire transcript to make the mechanics concrete. The fork only changes in chapter 07 when we add the new SASL mechanism.
+
 ## What you'll learn
 
 - The IRCv3 SASL handshake — how auth runs *inside* the CAP-LS-held registration window.

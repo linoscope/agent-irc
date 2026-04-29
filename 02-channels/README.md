@@ -2,6 +2,83 @@
 
 The toy server from chapter 01 only spoke to one client at a time. This chapter turns it into a real (toy) chat server: multiple clients, channels, broadcast, and a parser that survives the [`ircdocs/parser-tests`](https://github.com/ircdocs/parser-tests) corpus.
 
+## Mental model: what changes from chapter 01
+
+Chapter 01 had **one client** at a time. The server's job was just "complete a handshake with this one connection." There were no other clients to talk to.
+
+Chapter 02 has **many clients simultaneously**, and a new entity — the **channel** — to coordinate them.
+
+```
+                     ┌──────────────────────────────┐
+                     │           Server             │
+                     │                              │
+                     │  clients = {                 │
+                     │    "alice" → *Session,       │
+                     │    "bob"   → *Session,       │
+                     │    "carol" → *Session,       │
+                     │  }                           │
+                     │                              │
+                     │  channels = {                │
+                     │    "#room" → {alice, bob, carol},  ← a set of pointers
+                     │    "#dev"  → {alice, dave},        ← into clients map
+                     │  }                           │
+                     └──────────────────────────────┘
+                                  ▲
+              ┌───────────────────┼───────────────────┐
+              │                   │                   │
+        TCP socket A         TCP socket B         TCP socket C
+           (alice)              (bob)              (carol)
+```
+
+A channel is **a row in a server-side map**. There's nothing about it on any client's machine — clients only know the channel exists because the server told them. Joining `#room` is conceptually `channels["#room"].members.add(alice)`. Leaving is `delete`.
+
+### What sending a message looks like under the hood
+
+When alice sends `PRIVMSG #room :hi`, the server does this:
+
+```
+                 alice                                   server
+                  ───                                     ───
+   [client→]   PRIVMSG #room :hi
+                                              parse line
+                                              look up channel "#room"
+                                              for each member m ≠ alice:
+                                                  write to m's socket:
+                                                  ":alice!alice@host PRIVMSG #room :hi\r\n"
+                                              
+   [server→]   (no echo to alice unless echo-message
+               cap is requested — chapter 06)
+                                              ┌────────►  bob's socket
+                                              └────────►  carol's socket
+```
+
+This is the **fan-out pattern**: one inbound `PRIVMSG` from a sender becomes N outbound writes from the server, where N = channel size − 1. This is the entire mechanism that makes group chat work, and it's why a 1000-member channel is a server-resource cost: every message is a thousand writes.
+
+### The source prefix is what makes broadcast useful
+
+When bob's socket receives `:alice!alice@host PRIVMSG #room :hi`, the leading `:alice!alice@host` is the **source prefix** the server stamps on. Alice did not write it — she just sent `PRIVMSG #room :hi`. The server adds it on the way out so bob's client can answer "who said this?" There's no other "from" header in IRC; the prefix *is* the from header.
+
+This becomes load-bearing in chapter 06 when authentication arrives: the `nick` part of the prefix is just a display label and can be hijacked by NICK-grabbing, which is why chapter 06 introduces `account-tag` as the unforgeable identity instead.
+
+### Vocabulary new in this chapter
+
+| Term | What |
+|---|---|
+| **Channel member set** | The set of currently-connected clients who have JOIN'd a given channel. Lives on the server. |
+| **Fan-out** | One incoming message → N outgoing writes (one per other member). |
+| **Source prefix** | `:nick!user@host` at the start of a server-relayed line. Server-stamped. |
+| **NAMES list** | Numerics 353 + 366. The catalog of who's currently in a channel, sent to a joiner so their client knows who else is here. |
+
+### What chapter 02 deliberately skips
+
+- **Channel modes** (`+i` invite-only, `+m` moderated, `+t` topic-locked, `+b` bans): a real ircd has ~30 mode letters; we have zero.
+- **Channel ops** (`@nick`): no privilege tiers — every member is equal in chapter 02.
+- **Topic** (`/topic #room :news of the day`): the channel struct has a `topic` field but we never set or surface it.
+- **PRIVMSG to a nick** (DM): we relay channel messages and direct messages, but skip the WHOIS plumbing and most validation.
+- **PING/PONG, ISUPPORT, casemapping** — chapter 03.
+
+By the end of this chapter, two `weechat` clients can connect, JOIN the same channel, and chat. That's the deliverable.
+
 ## What you'll learn
 
 - How channels work as a server-side state object — they are not a peer-to-peer construct.

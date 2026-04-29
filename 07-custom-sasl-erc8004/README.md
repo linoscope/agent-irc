@@ -97,7 +97,7 @@ Three things, addressed in chapters 08-10:
 2. **Account name is just the truncated address.** `0xC502FEA9b3477878` is unmemorable. Chapter 09 replaces this with the on-chain registered name.
 3. **Nonce isn't bound to the deployment.** A signature for one server-id could replay against another. Chapter 10 binds the body to `(chain_id, server_name, nonce)`.
 
-By the end of chapter 07: `weechat` (with a wallet plugin) or our verify program produces a valid signature, and Ergo accepts it without ever storing a password.
+By the end of chapter 07: our verify program (which has go-ethereum/crypto baked in) produces a valid signature, and Ergo accepts it without ever storing a password. There's no off-the-shelf weechat or irssi plugin that does ERC8004 SASL — clients have to grow wallet support to participate, which is a real adoption barrier discussed in chapter 10.
 
 ## What you'll learn
 

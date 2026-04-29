@@ -101,13 +101,15 @@ By the end of this chapter, two `weechat` clients can connect, JOIN the same cha
 # Or play with it interactively. Terminal A:
 go run .
 
-# Terminal B (alice):
-weechat -t                                  # or: irssi
-/server add toy localhost/6667 -notls -autoconnect
-/connect toy
-/join #room
-hello, world
-
+# Terminal B (alice) — pick one client; the syntax differs:
+#
+#   weechat:                              irssi:
+#   weechat                               irssi
+#   /server add toy localhost/6667 -notls /connect localhost 6667
+#   /connect toy                          /join #room
+#   /join #room
+#   hello, world                          hello, world
+#
 # Terminal C (bob): same, different nick. Watch the messages cross.
 ```
 

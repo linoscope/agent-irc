@@ -191,7 +191,21 @@ When the user reports "this looks broken," ask for a screenshot or a description
 
 ## Common pitfalls
 
-- **Port conflicts.** Each chapter's start-ergo.sh listens on a fixed port (16670 → 16676 across chapters). If a stray Ergo from a prior session is still running, `fuser -k <port>/tcp` first.
+- **Port conflicts.** Each chapter's start-ergo.sh listens on a fixed port:
+
+  | Chapter | Port |
+  |---|---|
+  | 04 retiring-the-toy | 16670 |
+  | 05a capability-negotiation | 16671 |
+  | 06 sasl-and-account-tag | 16672 |
+  | 07 custom-sasl-erc8004 | 16673 |
+  | 08 gating-on-the-registry | 16674 |
+  | 09 identity-binding | 16675 |
+  | 10 authorization-lifecycle | 16676 |
+  | 05b vendor-capability | 16677 (out of order — chapter 05 was split after the rest were already numbered) |
+  | (anvil for ch08-10) | 8545 |
+
+  If a stray Ergo from a prior session is still running, `fuser -k <port>/tcp` first. Anvil hangs around too — kill it with `pkill -f anvil` (or `fuser -k 8545/tcp`).
 - **Stale tmux sessions.** `tmux kill-session -t tut 2>/dev/null` at the start of every recipe. Tmux sessions persist across your tool calls if left running.
 - **Stray weechat processes locking the config dir.** Use `--dir /tmp/weechat-tut` with a unique path per session; never let tmux-spawned weechat write to `~/.weechat/` (the user's real config).
 - **`go build` on Ergo needs `GOTOOLCHAIN=go1.26.2`.** The `start-ergo.sh` scripts already set this; if you `go build` Ergo manually, set it yourself or `auto` will fail looking for `1.26.0`.

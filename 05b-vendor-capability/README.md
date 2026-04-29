@@ -150,7 +150,7 @@ weechat
 /connect agent-irc-fork
 ```
 
-`Alt+R` for the raw buffer; scroll up. The CAP LS line that weechat received at connect time now contains `agent-irc.example/hello`. Try `/quote CAP REQ :agent-irc.example/hello` and watch the ACK come back.
+`Alt+R` (or `/server raw`) for the raw buffer; scroll up. The CAP LS line that weechat received at connect time now contains `agent-irc.example/hello`. Try `/quote CAP REQ :agent-irc.example/hello` and watch the ACK come back.
 
 The cap does nothing observable — that's deliberate. Chapter 07 adds the meaningful behavior (a SASL mechanism in the same vendor namespace).
 

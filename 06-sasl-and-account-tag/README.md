@@ -161,7 +161,7 @@ weechat
 /connect agentirc
 ```
 
-Press **`Alt+R`** to open the raw IRC buffer. Scroll to the top to see the full SASL handshake:
+Press **`Alt+R`** (or `/server raw`) to open the raw IRC buffer. Scroll to the top to see the full SASL handshake:
 
 ```
 --> CAP LS 302

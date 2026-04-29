@@ -126,7 +126,7 @@ weechat
 /connect agent-irc
 ```
 
-Press **`Alt+R`** to open weechat's raw IRC buffer. This is the closest thing to the `nc` view — every line in both directions, in chronological order.
+Press **`Alt+R`** (or type `/server raw` if your keybindings differ) to open weechat's raw IRC buffer. This is the closest thing to the `nc` view — every line in both directions, in chronological order.
 
 #### Step 1: see the LS that weechat already did at connect time
 

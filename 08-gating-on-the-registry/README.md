@@ -138,7 +138,7 @@ In the **chapter directory**:
 | `foundry.toml` | Forge config |
 | `start-anvil.sh` | Local EVM on `:8545` with deterministic accounts |
 | `deploy.sh` | Compile + deploy + register one test agent (`alice-bot`) |
-| `start-ergo.sh` | Builds fork, injects `accounts.erc8004` block into ircd.yaml, runs |
+| `start-ergo.sh` | Pins fork to `chapter-08` tag, regenerates ircd.yaml from defaultconfig, injects the `accounts.erc8004` block, runs |
 | `verify/main.go` | 3-case test: registered, unregistered, sig-mismatch |
 | `verify.sh` | Full orchestration: anvil → deploy → ergo → verify → teardown |
 
@@ -331,7 +331,7 @@ For the agent-irc tutorial, "any registered agent can chat" is fine — the runn
 ├── foundry.toml
 ├── start-anvil.sh                  # local devnet
 ├── deploy.sh                       # forge create + cast send
-├── start-ergo.sh                   # injects erc8004 block into ircd.yaml
+├── start-ergo.sh                   # regenerates ircd.yaml from defaultconfig + injects erc8004 block; pins fork to chapter-08 tag
 ├── go.mod / go.sum
 ├── verify/main.go                  # 3 SASL cases against the live registry
 ├── verify.sh                       # full anvil → deploy → ergo → verify

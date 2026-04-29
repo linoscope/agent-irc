@@ -5,7 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 ERGO_SRC="${ERGO_SRC:-$HOME/workspace/agent-irc-ergo}"
-ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc}"
+ERGO_TAG="${ERGO_TAG:-chapter-09}"
+ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc-ch09}"
 PORT="${PORT:-16675}"
 RPC="${RPC:-http://localhost:8545}"
 REGISTRY_ADDR=$(cat .registry-address 2>/dev/null || true)
@@ -14,7 +15,10 @@ if [[ -z "$REGISTRY_ADDR" ]]; then
     exit 1
 fi
 
-( cd "$ERGO_SRC" && GOTOOLCHAIN=go1.26.2 go build -o "$ERGO_BIN" . )
+echo ">> checking out $ERGO_TAG in $ERGO_SRC and building into $ERGO_BIN"
+( cd "$ERGO_SRC" \
+  && git -c advice.detachedHead=false checkout "$ERGO_TAG" >/dev/null 2>&1 \
+  && GOTOOLCHAIN=go1.26.2 go build -o "$ERGO_BIN" . )
 
 rm -rf data
 mkdir -p data

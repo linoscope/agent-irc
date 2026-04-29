@@ -6,7 +6,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 ERGO_SRC="${ERGO_SRC:-$HOME/workspace/agent-irc-ergo}"
-ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc}"
+ERGO_TAG="${ERGO_TAG:-chapter-08}"
+ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc-ch08}"
 PORT="${PORT:-16674}"
 RPC="${RPC:-http://localhost:8545}"
 REGISTRY_ADDR=$(cat .registry-address 2>/dev/null || true)
@@ -15,23 +16,33 @@ if [[ -z "$REGISTRY_ADDR" ]]; then
     exit 1
 fi
 
-echo ">> building agent-irc-ergo from $ERGO_SRC into $ERGO_BIN"
-( cd "$ERGO_SRC" && GOTOOLCHAIN=go1.26.2 go build -o "$ERGO_BIN" . )
+echo ">> checking out $ERGO_TAG in $ERGO_SRC and building into $ERGO_BIN"
+( cd "$ERGO_SRC" \
+  && git -c advice.detachedHead=false checkout "$ERGO_TAG" >/dev/null 2>&1 \
+  && GOTOOLCHAIN=go1.26.2 go build -o "$ERGO_BIN" . )
 
 rm -rf data
 mkdir -p data
 
-if [[ ! -f ircd.yaml ]]; then
-    cp ../07-custom-sasl-erc8004/ircd.yaml .
-fi
-sed -i -E "s/\":[0-9]+\":/\":$PORT\":/" ircd.yaml
-
-# Inject (or refresh) the erc8004: block under accounts:.
+# Regenerate ircd.yaml deterministically from defaultconfig each run, same
+# pattern as ch09/ch10. The earlier "patch in place" approach had a regex
+# bug where re-runs deleted sibling sub-keys under accounts:.
+"$ERGO_BIN" defaultconfig > ircd.yaml
 python3 <<PY
 import re
 p = "ircd.yaml"
 src = open(p).read()
-src = re.sub(r'\n    erc8004:.*?(?=\n[a-z]|\Z)', '', src, flags=re.DOTALL)
+src = re.sub(
+    r'    listeners:.*?(?=\n    unix-bind-mode|\n    tor-listeners)',
+    f'    listeners:\n        ":$PORT":\n',
+    src, count=1, flags=re.DOTALL,
+)
+src = src.replace("    enabled: true\n\n    # default language", "    enabled: false\n\n    # default language")
+src = src.replace("path: ircd.db", "path: data/ircd.db")
+src = src.replace('lock-file: "ircd.lock"', 'lock-file: "data/ircd.lock"')
+# Verbose logging for the tutorial.
+src = src.replace('type: "* -userinput -useroutput"', 'type: "* userinput useroutput"')
+src = re.sub(r'^        level: info$', '        level: debug', src, count=1, flags=re.MULTILINE)
 new_block = """
     erc8004:
         rpc-url: "$RPC"

@@ -2,133 +2,20 @@
 $3
 set
 $24
-0 AP9VDdQKv3n1mI5ZYY3bVw
-$2
-24
-*3
-$3
-set
-$24
 0 qta40HS1Q0uhF-kQcfte5Q
 $43
-5A6PPBjargIu8-LfI1io4ZN7jUcsMmVqYc87BKxHJPw
+bMjr6U4A8LhIbtcrCdZ0v3JcI8cSDn0qthE8kcMuHbg
 *3
 $3
 set
 $24
 0 V9e9BUFp-SxBYKo4u24M6w
 $248
-"-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgrQAQeh9Xf2WVCe82\nPGJsvIMaocDYP1FotqGZv0qjr72hRANCAARO9ktOLSDPsUEEMIgnp78gIRzVY2gP\nD2kKhC4spoUBvYtrSGkMyZJtTV0b6MCSX8G9S544zecyx4yqO3RdOrMM\n-----END PRIVATE KEY-----\n"
-*5
-$3
-set
-$33
-account.exists 0x70997970c51812dc
-$1
-1
-$2
-ae
-$10
-1777576312
-*5
-$3
-set
-$31
-account.name 0x70997970c51812dc
-$18
-0x70997970C51812dc
-$2
-ae
-$10
-1777576312
-*5
-$3
-set
-$42
-account.registered.time 0x70997970c51812dc
-$19
-1777461112313320796
-$2
-ae
-$10
-1777576312
-*5
-$3
-set
-$38
-account.credentials 0x70997970c51812dc
-$106
-{"Version":1,"PassphraseHash":null,"Certfps":null,"Salt":null,"Iters":0,"StoredKey":null,"ServerKey":null}
-$2
-ae
-$10
-1777576312
-*5
-$3
-set
-$35
-account.settings 0x70997970c51812dc
-$0
-
-$2
-ae
-$10
-1777576312
-*5
-$3
-set
-$43
-account.verificationcode 0x70997970c51812dc
-$0
-
-$2
-ae
-$10
-1777576312
+"-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgB2GYl4Rj4q/XK///\n3bDBIe9sXToy2Nc12pJMGkjB+gWhRANCAATIT8yqKvZlSZp2G04oqy/7odS9CdfF\nUJ2qaDj7PlvQONfIAbc5H75aNl7vL0kLUovnY83denk37Bda/GyXa/YB\n-----END PRIVATE KEY-----\n"
 *3
 $3
 set
-$38
-account.credentials 0x70997970c51812dc
-$106
-{"Version":1,"PassphraseHash":null,"Certfps":null,"Salt":null,"Iters":0,"StoredKey":null,"ServerKey":null}
-*3
-$3
-set
-$35
-account.settings 0x70997970c51812dc
-$0
-
-*3
-$3
-set
-$35
-account.verified 0x70997970c51812dc
-$1
-1
-*2
-$3
-del
-$43
-account.verificationcode 0x70997970c51812dc
-*3
-$3
-set
-$33
-account.exists 0x70997970c51812dc
-$1
-1
-*3
-$3
-set
-$31
-account.name 0x70997970c51812dc
-$18
-0x70997970C51812dc
-*3
-$3
-set
-$42
-account.registered.time 0x70997970c51812dc
-$19
-1777461112313320796
+$24
+0 AP9VDdQKv3n1mI5ZYY3bVw
+$2
+24

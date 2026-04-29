@@ -782,10 +782,10 @@ logging:
         #   internal        unexpected runtime behavior, including potential bugs
         #   userinput       raw lines sent by users
         #   useroutput      raw lines sent to users
-        type: "* userinput useroutput"
+        type: "* -userinput -useroutput"
 
         # one of: debug info warn error
-        level: debug
+        level: info
     #-
     #   # example of a file log that avoids logging IP addresses
     #   method: file

@@ -25,9 +25,28 @@ If you're a human, you can read this too. It's just opinionated about its audien
 │
 ├── ergo/                  ← upstream Ergo (chapter 04 builds this read-only)
 └── agent-irc-ergo/        ← our fork, branch `agent-irc` (chapters 05b, 07–10 modify it)
+    ├── tag: chapter-05    ← snapshot ch05b's verify runs against
+    ├── tag: chapter-07    ← snapshot ch07's verify runs against
+    ├── tag: chapter-08
+    ├── tag: chapter-09
+    └── tag: chapter-10    ← HEAD of agent-irc branch
 ```
 
 If `~/workspace/ergo` or `~/workspace/agent-irc-ergo` is missing, follow the "Repository layout" section in the top-level README to set them up.
+
+### Per-chapter tag pinning
+
+Each chapter's `start-ergo.sh` checks out its own tag before building:
+
+```bash
+# what start-ergo.sh does internally:
+git -C "$ERGO_SRC" -c advice.detachedHead=false checkout chapter-XX
+GOTOOLCHAIN=go1.26.2 go build -o /tmp/ergo-agentirc-chXX .
+```
+
+Per-chapter binaries (`/tmp/ergo-agentirc-ch05`, `…-ch07`, etc.) coexist on disk. The fork's HEAD ends up wherever the most recent `start-ergo.sh` left it; that's expected. If you need to inspect HEAD, `git -C ~/workspace/agent-irc-ergo checkout agent-irc` returns it.
+
+**This is why chapter 7's signature verification still works after chapter 10 added body-binding** — chapter 7 builds from the `chapter-07` tag, which predates the binding code. No backwards-compat shims needed.
 
 ## How to verify chapters
 

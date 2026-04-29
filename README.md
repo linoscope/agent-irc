@@ -85,7 +85,15 @@ git remote set-url origin https://github.com/ergochat/ergo.git
 git checkout -b agent-irc
 ```
 
-The fork lives on the `agent-irc` branch with one commit per chapter (ch05, ch07, ch08, ch09, ch10). Chapter 06 introduces no fork changes — it exercises Ergo's existing SASL.
+The fork lives on the `agent-irc` branch with one commit per chapter (ch05, ch07, ch08, ch09, ch10). Each commit is also tagged: `chapter-05`, `chapter-07`, `chapter-08`, `chapter-09`, `chapter-10`. Chapter 06 introduces no fork changes — it exercises Ergo's existing SASL.
+
+### Why per-chapter tags?
+
+When a chapter's `start-ergo.sh` runs, it checks out *that chapter's tag* before building, so each chapter's verify runs against the fork-as-of-that-chapter. This prevents later chapters' code from leaking back into earlier chapters' tests (e.g., chapter 10's body-binding doesn't break chapter 7's signature verification, because chapter 7 builds against the `chapter-07` tag which doesn't have that code yet).
+
+Each chapter builds its own binary at `/tmp/ergo-agentirc-chXX`. They coexist on disk; running chapter N doesn't disturb other chapters' builds.
+
+If you fix a bug in an earlier chapter (e.g., chapter 7), you'd amend that chapter's commit and rebase chapters 8–10 forward. That's the standard "series of patches" maintenance model — disruptive when it happens, but each chapter stays a coherent self-contained unit on its own tag.
 
 ## Format
 

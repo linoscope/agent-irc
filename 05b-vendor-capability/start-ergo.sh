@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# start-ergo.sh — build the agent-irc fork (if needed), reset state, run.
+# start-ergo.sh — pin the agent-irc fork to chapter 05's tag, build, run.
 #
-# This is the chapter-04 launcher pointed at ../agent-irc-ergo (our fork)
-# instead of upstream ergo. Resulting binary is /tmp/ergo-agentirc.
+# Each chapter pins the fork to its own tag so cross-chapter changes don't
+# bleed in. See AGENTS.md "Repository layout" for the tag scheme.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 ERGO_SRC="${ERGO_SRC:-$HOME/workspace/agent-irc-ergo}"
-ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc}"
+ERGO_TAG="${ERGO_TAG:-chapter-05}"
+ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc-ch05}"
 PORT="${PORT:-16677}"
 
-# Always rebuild — chapter 05+ work modifies the fork, and a stale binary
-# masking a recompile failure would silently invalidate the verify.
-echo ">> building agent-irc-ergo from $ERGO_SRC into $ERGO_BIN"
-( cd "$ERGO_SRC" && GOTOOLCHAIN=go1.26.2 go build -o "$ERGO_BIN" . )
+echo ">> checking out $ERGO_TAG in $ERGO_SRC and building into $ERGO_BIN"
+( cd "$ERGO_SRC" \
+  && git -c advice.detachedHead=false checkout "$ERGO_TAG" >/dev/null 2>&1 \
+  && GOTOOLCHAIN=go1.26.2 go build -o "$ERGO_BIN" . )
 
 rm -rf data
 mkdir -p data

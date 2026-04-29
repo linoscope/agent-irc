@@ -371,7 +371,261 @@ accounts:
         registry-address: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
         chain-id: 31337
         cache-ttl: 0s
+    # is account authentication enabled, i.e., can users log into existing accounts?
+    authentication-enabled: true
 
+    # account registration
+    registration:
+        # can users register new accounts for themselves? if this is false, operators with
+        # the `accreg` capability can still create accounts with `/NICKSERV SAREGISTER`
+        enabled: true
+
+        # can users use the REGISTER command to register before fully connecting?
+        allow-before-connect: true
+
+        # global throttle on new account creation
+        throttling:
+            enabled: true
+            # window
+            duration: 10m
+            # number of attempts allowed within the window
+            max-attempts: 30
+
+        # this is the bcrypt cost we'll use for account passwords
+        # (note that 4 is the lowest value allowed by the bcrypt library)
+        bcrypt-cost: 4
+
+        # length of time a user has to verify their account before it can be re-registered
+        verify-timeout: "32h"
+
+        # options for email verification of account registrations
+        email-verification:
+            enabled: false
+            sender: "admin@my.network"
+            require-tls: true
+            helo-domain: "my.network" # defaults to server name if unset
+            # set to `tcp4` to force sending over IPv4, `tcp6` to force IPv6:
+            # protocol: "tcp4"
+            # set to force a specific source/local IPv4 or IPv6 address:
+            # local-address: "1.2.3.4"
+            # options to enable DKIM signing of outgoing emails (recommended, but
+            # requires creating a DNS entry for the public key):
+            # dkim:
+            #     domain: "my.network"
+            #     selector: "20200229"
+            #     key-file: "dkim.pem"
+            # to use an MTA/smarthost instead of sending email directly:
+            # mta:
+            #     server: localhost
+            #     port: 25
+            #     username: "admin"
+            #     password: "hunter2"
+            #     implicit-tls: false # TLS from the first byte, typically on port 465
+            # addresses that are not accepted for registration:
+            address-blacklist:
+            #    - "*@mailinator.com"
+            address-blacklist-syntax: "glob" # change to "regex" for regular expressions
+            # file of newline-delimited address blacklist entries (no enclosing quotes)
+            # in the above syntax (i.e. either globs or regexes). supersedes
+            # address-blacklist if set:
+            # address-blacklist-file: "/path/to/address-blacklist-file"
+            timeout: 60s
+            # email-based password reset:
+            password-reset:
+                enabled: false
+                # time before we allow resending the email
+                cooldown: 1h
+                # time for which a password reset code is valid
+                timeout: 1d
+
+    # throttle account login attempts (to prevent either password guessing, or DoS
+    # attacks on the server aimed at forcing repeated expensive bcrypt computations)
+    login-throttling:
+        enabled: true
+
+        # window
+        duration:  1m
+
+        # number of attempts allowed within the window
+        max-attempts: 3
+
+    # some clients (notably Pidgin and Hexchat) offer only a single password field,
+    # which makes it impossible to specify a separate server password (for the PASS
+    # command) and SASL password. if this option is set to true, a client that
+    # successfully authenticates with SASL will not be required to send
+    # PASS as well, so it can be configured to authenticate with SASL only.
+    skip-server-password: false
+
+    # enable login to accounts via the PASS command, e.g., PASS account:password
+    # this is useful for compatibility with old clients that don't support SASL
+    login-via-pass-command: true
+
+    # advertise the SCRAM-SHA-256 authentication method. set to false in case of
+    # compatibility issues with certain clients:
+    advertise-scram: true
+
+    # require-sasl controls whether clients are required to have accounts
+    # (and sign into them using SASL) to connect to the server
+    require-sasl:
+        # if this is enabled, all clients must authenticate with SASL while connecting.
+        # WARNING: for a private server, you MUST set accounts.registration.enabled
+        # to false as well, in order to prevent non-administrators from registering
+        # accounts.
+        enabled: false
+
+        # IPs/CIDRs which are exempted from the account requirement
+        exempted:
+            - "localhost"
+            # - '10.10.0.0/16'
+
+    # nick-reservation controls how, and whether, nicknames are linked to accounts
+    nick-reservation:
+        # is there any enforcement of reserved nicknames?
+        enabled: true
+
+        # how many nicknames, in addition to the account name, can be reserved?
+        # (note that additional nicks are unusable under force-nick-equals-account
+        # or if the client is always-on)
+        additional-nick-limit: 0
+
+        # method describes how nickname reservation is handled
+        #   strict:   users must already be logged in to their account (via
+        #             SASL, PASS account:password, or /NickServ IDENTIFY)
+        #             in order to use their reserved nickname(s)
+        #   optional: no enforcement by default, but allow users to opt in to
+        #             the enforcement level of their choice
+        method: strict
+
+        # allow users to set their own nickname enforcement status, e.g.,
+        # to opt out of strict enforcement
+        allow-custom-enforcement: false
+
+        # format for guest nicknames:
+        # 1. these nicknames cannot be registered or reserved
+        # 2. if a client is automatically renamed by the server,
+        #    this is the template that will be used (e.g., Guest-nccj6rgmt97cg)
+        # 3. if force-guest-format (see below) is enabled, clients without
+        #    a registered account will have this template applied to their
+        #    nicknames (e.g., 'katie' will become 'Guest-katie')
+        guest-nickname-format: "Guest-*"
+
+        # when enabled, forces users not logged into an account to use
+        # a nickname matching the guest template. a caveat: this may prevent
+        # users from choosing nicknames in scripts different from the guest
+        # nickname format.
+        force-guest-format: false
+
+        # when enabled, forces users logged into an account to use the
+        # account name as their nickname. when combined with strict nickname
+        # enforcement, this lets users treat nicknames and account names
+        # as equivalent for the purpose of ban/invite/exception lists.
+        force-nick-equals-account: true
+
+        # parallel setting to force-nick-equals-account: if true, this forbids
+        # anonymous users (i.e., users not logged into an account) to change their
+        # nickname after the initial connection is complete
+        forbid-anonymous-nick-changes: false
+
+    # multiclient controls whether Ergo allows multiple connections to
+    # attach to the same client/nickname identity; this is part of the
+    # functionality traditionally provided by a bouncer like ZNC
+    multiclient:
+        # when disabled, each connection must use a separate nickname (as is the
+        # typical behavior of IRC servers). when enabled, a new connection that
+        # has authenticated with SASL can associate itself with an existing
+        # client
+        enabled: true
+
+        # if this is disabled, clients have to opt in to bouncer functionality
+        # using nickserv or the cap system. if it's enabled, they can opt out
+        # via nickserv
+        allowed-by-default: true
+
+        # whether to allow clients that remain on the server even
+        # when they have no active connections. The possible values are:
+        # "disabled", "opt-in", "opt-out", or "mandatory".
+        always-on: "opt-in"
+
+        # whether to mark always-on clients away when they have no active connections:
+        auto-away: "opt-in"
+
+        # QUIT always-on clients from the server if they go this long without connecting
+        # (use 0 or omit for no expiration):
+        #always-on-expiration: 90d
+
+    # vhosts controls the assignment of vhosts (strings displayed in place of the user's
+    # hostname/IP) by the HostServ service
+    vhosts:
+        # are vhosts enabled at all?
+        enabled: true
+
+        # maximum length of a vhost
+        max-length: 64
+
+        # regexp for testing the validity of a vhost
+        # (make sure any changes you make here are RFC-compliant)
+        valid-regexp: '^[0-9A-Za-z.\-_/]+$'
+
+    # modes that are set by default when a user connects
+    # if unset, no user modes will be set by default
+    # +i is invisible (a user's channels are hidden from whois replies)
+    # see  /QUOTE HELP umodes  for more user modes
+    default-user-modes: +i
+
+    # pluggable authentication mechanism, via subprocess invocation
+    # see the manual for details on how to write an authentication plugin script
+    auth-script:
+        enabled: false
+        command: "/usr/local/bin/authenticate-irc-user"
+        # constant list of args to pass to the command; the actual authentication
+        # data is transmitted over stdin/stdout:
+        args: []
+        # alternatively, pass the input to a persistent process over unix domain socket:
+        #socket: "/tmp/ergo_auth_sidecar"
+        # should we automatically create users if the plugin returns success?
+        autocreate: true
+        # timeout for process execution, after which we send a SIGTERM:
+        timeout: 9s
+        # how long after the SIGTERM before we follow up with a SIGKILL:
+        kill-timeout: 1s
+        # how many scripts are allowed to run at once? 0 for no limit:
+        max-concurrency: 64
+
+    # support for login via OAuth2 bearer tokens
+    oauth2:
+        enabled: false
+        # should we automatically create users on presentation of a valid token?
+        autocreate: true
+        # enable this to use auth-script for validation:
+        auth-script: false
+        introspection-url: "https://example.com/api/oidc/introspection"
+        introspection-timeout: 10s
+        # omit for auth method `none`; required for auth method `client_secret_basic`:
+        client-id: "ergo"
+        client-secret: "4TA0I7mJ3fUUcW05KJiODg"
+
+    # support for login via JWT bearer tokens
+    jwt-auth:
+        enabled: false
+        # should we automatically create users on presentation of a valid token?
+        autocreate: true
+        # any of these token definitions can be accepted, allowing for key rotation
+        tokens:
+            -
+                algorithm: "hmac" # either 'hmac', 'rsa', or 'eddsa' (ed25519)
+                # hmac takes a symmetric key, rsa and eddsa take PEM-encoded public keys;
+                # either way, the key can be specified either as a YAML string:
+                key: "nANiZ1De4v6WnltCHN2H7Q"
+                # or as a path to the file containing the key:
+                #key-file: "jwt_pubkey.pem"
+                # list of JWT claim names to search for the user's account name (make sure the format
+                # is what you expect, especially if using "sub"):
+                account-claims: ["preferred_username"]
+                # if a claim is formatted as an email address, require it to have the following domain,
+                # and then strip off the domain and use the local-part as the account name:
+                #strip-domain: "example.com"
+
+# channel options
 channels:
     # modes that are set when new channels are created
     # +n is no-external-messages, +t is op-only-topic,
@@ -679,7 +933,7 @@ limits:
 # fakelag: prevents clients from spamming commands too rapidly
 fakelag:
     # whether to enforce fakelag
-    enabled: false
+    enabled: true
 
     # time unit for counting command rates
     window: 1s
@@ -753,7 +1007,7 @@ history:
     # across server restarts. however, you may want to understand how message
     # history interacts with the GDPR and/or any data privacy laws that apply
     # in your country and the countries of your users.
-    enabled: false
+    enabled: true
 
     # if the in-memory backend is enabled for a channel, how many channel-specific events
     # (messages, joins, parts) should be retained?
@@ -860,7 +1114,7 @@ allow-environment-overrides: true
 # metadata support for setting key/value data on channels and nicknames.
 metadata:
     # can clients store metadata?
-    enabled: false
+    enabled: true
     # if this is true, only server operators with the `metadata` capability can edit metadata:
     operator-only-modification: false
     # how many keys can a client subscribe to?

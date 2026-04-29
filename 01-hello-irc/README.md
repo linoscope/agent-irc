@@ -2,6 +2,115 @@
 
 Build the smallest IRC server that completes the registration handshake.
 
+## Mental model: what is IRC?
+
+Before any code, here's the picture in 5 minutes.
+
+### One paragraph
+
+IRC is a 1988 chat protocol that runs over a single long-lived TCP connection per client. Every line is a UTF-8 text command terminated by CR LF. The server is the source of truth for everything — who's connected, what channels exist, who's in each one. Clients send commands; the server validates, mutates state, and broadcasts the resulting events to whoever's listening. The protocol has no acknowledgments, no message IDs (until IRCv3), no built-in encryption (until you bolt on TLS), and no notion of "rooms exist on multiple servers" without a federation protocol the IRCs we care about don't use. It is gloriously simple, and that simplicity is exactly why we can teach it from byte zero.
+
+### The four entities
+
+```
+                        ┌────────────────────┐
+                        │       Server       │
+                        │                    │
+                        │  • clients (set)   │
+                        │  • channels (map)  │
+                        │  • who is in what  │
+                        └─────────┬──────────┘
+                  ┌───────────────┼───────────────┐
+                  │               │               │
+            ┌─────┴─────┐   ┌─────┴─────┐   ┌─────┴─────┐
+            │  Client   │   │  Client   │   │  Client   │
+            │  (alice)  │   │   (bob)   │   │  (carol)  │
+            └───────────┘   └───────────┘   └───────────┘
+                  │               │               │
+                  └────── #room (a channel) ──────┘
+                          (server-side state)
+```
+
+- **Server.** Holds all state. One process, one binary. (Multi-server federation exists — RFC 2813, TS6 — but it's a 30-year-old codebase of pain we deliberately avoid.)
+- **Client.** A long-lived TCP connection that has identified itself as someone. Identifies via two strings: a *nick* (display name, e.g. `alice`) and a *user@host* part (mostly cosmetic).
+- **Channel.** A named, server-managed broadcast group, conventionally prefixed with `#` (e.g. `#room`). Joining is `JOIN #room`; leaving is `PART #room`. Messages sent to `#room` are fanned out by the server to every other current member. There is **no** peer-to-peer channel; the channel is a row in a server-side map.
+- **Message.** A line. Either client→server (a *command*: `NICK`, `JOIN`, `PRIVMSG`, …) or server→client (a *numeric reply* like `001` or `353`, or a *relayed event* like `:alice!… JOIN #room`).
+
+### The whole conversation, end to end
+
+What happens when alice connects, joins `#room`, says "hi", and disconnects:
+
+```
+TCP connect to irc.example:6667        # bytes start flowing
+
+C: NICK alice                          ┐ "registration": tell the
+C: USER alice 0 * :Alice the Agent     ┘  server who you are
+                                       
+S: :irc.example 001 alice :Welcome…    ← server's "you're in" greeting
+S: :irc.example 002 alice :…           ← a few more numeric replies (chapter 03)
+S: :irc.example 005 alice CASEMAPPING=…  ← capability advertisement (chapter 03)
+
+C: JOIN #room                          ┐ alice wants in
+S: :alice!alice@host JOIN #room        │ ← server confirms by relaying the
+                                       │   JOIN event (this is what other
+                                       │   members in #room will see too)
+S: :irc.example 353 alice = #room :…   │ ← list of current members (NAMES)
+S: :irc.example 366 alice #room :End…  ┘ ← end of NAMES list
+
+C: PRIVMSG #room :hi everyone          ← alice sends a message
+                                       
+   [server fans this out to every
+    other current member of #room as:]
+                                       
+S→bob:   :alice!alice@host PRIVMSG #room :hi everyone
+S→carol: :alice!alice@host PRIVMSG #room :hi everyone
+
+C: QUIT :bye                           ← alice leaves
+S→bob:   :alice!alice@host QUIT :bye   ← everyone in shared channels learns
+S→carol: :alice!alice@host QUIT :bye
+
+TCP close.                             # connection's gone
+```
+
+Five things this picture surfaces that come back constantly:
+
+1. **Every message is a single line.** No multi-line frames, no length-prefixed bodies. CR LF terminates everything.
+2. **The server stamps a source prefix on relayed events** (`:alice!alice@host`). The client never writes this; the server adds it so the recipient knows who the message is from. The prefix is **the** identity carrier on the wire.
+3. **Numeric replies (001, 353, 366, …) are how the server answers commands.** They have a fixed shape: `:server NNN nick params... :human-readable-text`. Chapters 03 and beyond explain why there are so many.
+4. **State changes propagate by event broadcast, not by query.** Bob doesn't poll "is alice in #room?" — the server told him `JOIN #room` from alice when she joined and will tell him `QUIT` when she leaves. Bob's client maintains a local mirror. Servers are authoritative; clients are projections.
+5. **There's no acknowledgment that bob received alice's PRIVMSG.** TCP delivered it to bob's *socket*. Whether bob's *client process* read it is invisible to alice. (IRCv3 `labeled-response` adds optional acknowledgement for request/response semantics — chapter 06.)
+
+### Vocabulary you'll see throughout
+
+| Term | What it is |
+|---|---|
+| **Nick** (or nickname) | Your display name on the network. Unique while you're connected. Mutable via `/nick`. |
+| **User**, **host** | The middle and tail of `nick!user@host`. `user` is whatever you sent in `USER`; `host` is your IP or a cloaked variant. Largely cosmetic. |
+| **Channel** | `#name`. Server-managed broadcast group. Joining = adding yourself to a set on the server. |
+| **Registration** | The act of completing the initial handshake (`NICK` + `USER` → `001`). Once "registered," you can issue most commands. |
+| **Numeric reply** | A 3-digit code from server to client. `001`–`099` are connection-level, `200`–`399` are info, `400`–`599` are errors. The full registry: [defs.ircdocs.horse](https://defs.ircdocs.horse/defs/numerics.html). |
+| **PRIVMSG** | The "send a message" verb. Targets a channel (`#room`) or a nick (`bob`). |
+| **NOTICE** | Like PRIVMSG but, by convention, no auto-reply. Used for system messages and bot notifications. |
+| **PING / PONG** | Keepalive (chapter 03). |
+| **CAP** | "Capability negotiation" — IRCv3's mechanism for clients and servers to opt into newer features without breaking old ones (chapter 05). |
+| **SASL** | The authentication framework, run inside the CAP-held registration window (chapter 06). |
+| **`account-tag`** | An IRCv3 message tag that carries a verified account name on every message — the only honest identity signal (chapter 06). |
+
+### What we are *not* implementing in chapter 01
+
+To keep the first server under 150 lines, we ignore:
+
+- **Channels** (chapter 02).
+- **PING/PONG keepalive** — your test client will disconnect cleanly, so we don't need it yet (chapter 03).
+- **ISUPPORT (numeric 005)** — telling the client what flavor of IRC this is (chapter 03).
+- **Casemapping rules** — `Foo[bar]` and `foo{bar}` are the same nick on most networks (chapter 03).
+- **Error replies** — sending the wrong command should produce a numeric, but chapter 01 just ignores unknowns.
+- **TLS, IRCv3, SASL** — all later chapters.
+
+What we *do* implement: enough to take a fresh TCP connection, accept `NICK` + `USER`, and emit `001 RPL_WELCOME`. That's the door into the protocol. Once it works, every later feature is a layer on top.
+
+Now to the code.
+
 ## What you'll learn
 
 - The IRC line framing (CR LF, 512-byte cap, the trailing `:` parameter).

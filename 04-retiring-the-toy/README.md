@@ -40,7 +40,7 @@ We could spend six months extending the toy and still not match this. More impor
 
 ## What you'll do in this chapter
 
-1. **Build Ergo.** Single Go binary, ~16 MB. Requires Go 1.26 (auto-downloaded via the `GOTOOLCHAIN` mechanism if your local Go is older).
+1. **Build Ergo.** Single Go binary, ~16 MB. Ergo's `go.mod` requests Go 1.26. If your local Go is older, `start-ergo.sh` sets `GOTOOLCHAIN=go1.26.2` to download the right toolchain explicitly — the default `GOTOOLCHAIN=auto` looks for `1.26.0` and fails because the published patch release is `1.26.2`.
 2. **Run it with a minimal config** (`ircd.yaml`) that listens on `:16670` plaintext-only, no TLS, in-memory data dir.
 3. **Run the same broadcast smoke test from chapter 02** against the real binary, and observe what you get for free.
 4. **Take a guided tour** of `~/workspace/ergo/irc/` so you know where to look in chapters 05–10.

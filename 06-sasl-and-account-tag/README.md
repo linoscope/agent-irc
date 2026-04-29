@@ -132,13 +132,13 @@ Look at Alice's JOIN line:
 @account=Alice;msgid=...;time=... :Alice!~u@host.irc JOIN #room
 ```
 
-Account-tag isn't PRIVMSG-only. Every relayed message from an authenticated session carries it: JOIN, PART, QUIT, NICK, MODE, KICK, INVITE, AWAY. This means a channel ACL that looks up "is the joiner authorized to be in this channel" can use the account-tag on the JOIN itself, before the JOIN is broadcast. Chapter 10 exploits this for ERC-8004 channel gating.
+Account-tag isn't PRIVMSG-only. Every relayed message from an authenticated session carries it: JOIN, PART, QUIT, NICK, MODE, KICK, INVITE, AWAY. This means a channel ACL that looks up "is the joiner authorized to be in this channel" can use the account-tag on the JOIN itself, before the JOIN is broadcast. Chapter 10 lists ERC-8004 channel gating as future work — the mechanism is straightforward (a custom channel mode that consults the registry on JOIN), but we ran out of chapter scope.
 
 ### Persistence across reconnect
 
 We registered Alice once. The next time her client connects (phase 2), it just SASLs in — the credentials are persistent in Ergo's BoltDB. Restart Ergo, and Alice's account is still there. This is the *account-as-database-row* model that bouncers (ZNC, soju) historically bolted on top of unmodified IRC servers; in Ergo it's first-class.
 
-For agent-irc this is the foundation of the always-on agent design. An agent registers once, gets the IRCv3 `draft/persistence` capability if it wants always-on (ergo-specific), and its channel memberships and history survive across crashes/restarts/redeploys. Chapter 10 wires this together with our ERC-8004 lifecycle hooks.
+For agent-irc this is the foundation of the always-on agent design. An agent registers once, gets the IRCv3 `draft/persistence` capability if it wants always-on (ergo-specific), and its channel memberships and history survive across crashes/restarts/redeploys. Chapter 10 leans on this when its mutation watcher KILLs an always-on session — the watcher uses Ergo's `killClients` (Logout + Quit + destroy) to force the wire close even when the always-on identity would otherwise persist.
 
 ## Critical Thinking: SASL PLAIN over TLS, but where's the TLS?
 

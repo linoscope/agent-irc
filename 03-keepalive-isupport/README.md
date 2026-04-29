@@ -178,7 +178,10 @@ Two design decisions in this chapter — *who initiates*, and *what counts as ac
 
 **What counts as activity.** We treat any inbound byte as activity, including PRIVMSG echoes. That's permissive. A stricter server could require an actual PONG to a recent PING (and not credit any other line as proof-of-life). The trade-off is that a client which is actively sending traffic but somehow has TCP-level wedge will go undetected by the looser policy until the OS times out the socket. For an agent network, where "is this agent still alive" is a real authorization question (chapter 10 ties registry-mutation to KILL on the next idle cycle), the stricter policy is probably right.
 
-**Detection latency.** A crashed agent will keep its TCP connection in `ESTABLISHED` (no RST sent) until either side notices. With our 120s default, that's up to 240s of "agent appears online but isn't." For an authorization-bearing substrate, that's too long. Chapter 10 will revisit this and propose either (a) a much shorter idle window for agent connections (≤30s) or (b) an explicit `agent-irc.heartbeat` signal where missed beats KILL. Both are tradeoffs against egress cost.
+**Detection latency.** A crashed agent will keep its TCP connection in `ESTABLISHED` (no RST sent) until either side notices. With our 120s default, that's up to 240s of "agent appears online but isn't." For an authorization-bearing substrate, that's too long. Two production fixes:
+
+1. **Tighter idle window for agent connections.** Drop to ≤30s with PING after 15s. Egress cost grows linearly in `1/IdleTimeout`.
+2. **Authority-bound liveness.** Chapter 10 introduces a separate mechanism — a registry mutation watcher that polls the on-chain state every N seconds and KILLs sessions whose authority has been revoked. That isn't quite the same as crash detection, but it composes: a session whose agent has been removed from the registry mid-crash will be cleaned up at the next watcher tick regardless of whether the TCP socket has been declared dead yet.
 
 ## Files
 

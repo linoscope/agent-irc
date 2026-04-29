@@ -230,8 +230,9 @@ irc/handlers.go         # registry-returned name now becomes accountName
 
 ## Next
 
-[Chapter 10 — Authorization and lifecycle](../10-authorization-lifecycle) — the closing chapter. We tie three loose ends:
+[Chapter 10 — Authorization and lifecycle](../10-authorization-lifecycle) — the closing chapter. Two production-readiness fixes:
 
-- **Authorization on `account-tag`**, not nick. A custom channel ACL gates `#agents-only` on registry membership.
-- **KILL on registry mutation**: a periodic poll detects when an agent's on-chain entry is renamed or removed, and severs the IRC session.
-- **Replay protection on the SASL nonce**: bind the body to `(server_id, chain_id, expiry)` so a signature for chain X cannot replay on chain Y.
+- **Replay protection on the SASL body**: bind the EIP-191 message to `(chain_id, server_name, nonce)` so a signature for chain X cannot replay on chain Y, and a signature for server A cannot replay on server B.
+- **KILL on registry mutation**: a periodic mutation watcher polls the registry for every authenticated agent-irc client and forcibly disconnects sessions whose on-chain name has been renamed or removed.
+
+(Channel-level ACLs that gate `JOIN` on registry membership are sketched as future work in chapter 10's closing section — the mechanism is clear but they didn't fit.)

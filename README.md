@@ -37,17 +37,54 @@ Retire the toy. Switch to Ergo and walk through the IRCv3 stack that converts IR
 
 7. **[07-custom-sasl-erc8004](./07-custom-sasl-erc8004)** — A new SASL mechanism: server emits a nonce, client signs with a wallet keypair, server `ecrecover`s. No on-chain check yet.
 8. **[08-gating-on-the-registry](./08-gating-on-the-registry)** — Local `anvil` + a minimal ERC-8004 registry contract; SASL handler queries it; cache + circuit breaker.
-9. **[09-identity-binding](./09-identity-binding)** — ERC-8004 name = account = forced nick. Normalization (charset, casemapping). Reject nick changes that don't round-trip the registry.
-10. **[10-authorization-lifecycle](./10-authorization-lifecycle)** — Channel ACLs key on `account-tag`; KILL on registry rename/removal; replay protection on nonces.
+9. **[09-identity-binding](./09-identity-binding)** — ERC-8004 name = account = forced nick. Charset normalization. Validation rejects names that don't conform to IRC nick rules.
+10. **[10-authorization-lifecycle](./10-authorization-lifecycle)** — Cross-chain replay protection (sig binds to `chain_id` + server name); KILL on registry rename/removal via a periodic mutation watcher.
 
 ## Prerequisites
 
 | Tool | Purpose | Install |
 |---|---|---|
-| Go ≥1.22 | Build the toy server (Part I) and Ergo (Part II+) | [go.dev](https://go.dev) — Ergo's `go.mod` requests 1.26; the Go toolchain auto-downloads if your local Go is ≥1.21 |
+| Go ≥1.22 | Part I (the toy server). Part II+ (Ergo) requests Go 1.26 in `go.mod` | [go.dev](https://go.dev) — see Go toolchain note below |
 | `weechat` or `irssi` | Real IRC client for sanity checks | `apt install weechat` |
 | `nc` (netcat) | Raw protocol verification | usually preinstalled |
+| `python3` | Tutorial scripts use Python for YAML manipulation in `start-ergo.sh` | usually preinstalled |
 | `foundry` (`anvil`, `forge`, `cast`) | Local Ethereum devnet (Part III, ch08+) | `curl -L https://foundry.paradigm.xyz \| bash && foundryup` |
+| Ergo source clone (chapters 04–10) | Build target | see "Repository layout" below |
+
+### Go toolchain note
+
+Ergo's `go.mod` says `go 1.26`. `GOTOOLCHAIN=auto` (the default) only works if a `1.26.0` release exists for your platform; if your local Go is older and the build fails with `toolchain not available`, set the explicit version:
+
+```bash
+GOTOOLCHAIN=go1.26.2 go build .
+```
+
+The `start-ergo.sh` scripts in chapters 04–10 already set this. If you're on Go 1.26.x already, there's nothing to do.
+
+## Repository layout
+
+This tutorial assumes three sibling directories under `~/workspace/`:
+
+| Path | What | When you need it |
+|---|---|---|
+| `~/workspace/agent-irc/` | This tutorial repo (you are here) | Always |
+| `~/workspace/ergo/` | A clone of upstream [ergochat/ergo](https://github.com/ergochat/ergo) | Chapter 04 (the read-only "real Ergo" build) |
+| `~/workspace/agent-irc-ergo/` | Our fork of Ergo with the agent-irc customizations | Chapters 05–10 |
+
+To set up:
+
+```bash
+# upstream Ergo (chapter 04 builds this unmodified)
+git clone https://github.com/ergochat/ergo.git ~/workspace/ergo
+
+# the fork we modify in chapters 05+ (start with a fresh local clone, branch off)
+git clone ~/workspace/ergo ~/workspace/agent-irc-ergo
+cd ~/workspace/agent-irc-ergo
+git remote set-url origin https://github.com/ergochat/ergo.git
+git checkout -b agent-irc
+```
+
+The fork lives on the `agent-irc` branch with one commit per chapter (ch05, ch07, ch08, ch09, ch10). Chapter 06 introduces no fork changes — it exercises Ergo's existing SASL.
 
 ## Format
 
@@ -56,7 +93,7 @@ Each chapter has:
 - **Runnable code** — Go files (and from chapter 08, Solidity).
 - **`verify.sh`** — script that exercises the chapter's deliverable end-to-end. If it exits 0, the chapter works.
 
-The running example throughout: an agent named `oracle-bot` that progresses from "echoes hello in a channel" to "ERC-8004-authenticated participant in authenticated multicast topics."
+The running example throughout: an agent named `alice-bot` (or just `alice` in early chapters) that progresses from "completes a registration handshake" to "ERC-8004-authenticated participant whose IRC session is severed when the on-chain entry mutates."
 
 ## Reading list (background)
 

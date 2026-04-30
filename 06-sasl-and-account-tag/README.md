@@ -122,6 +122,8 @@ Notice Alice's message carries `account=Alice`; Bob's has no `account=` tag at a
 
 ### Watching it interactively (weechat as alice, nc as bob)
 
+The chapter's experiment requires alice's session to live across multiple steps; weechat is the right tool for her side because it auto-replies to keepalive PINGs. Bob is one-shot (sends one PRIVMSG), so nc is fine for him.
+
 The verify program is fine for asserting correctness. To watch SASL and `account-tag` happen by hand, run two terminals: one weechat as authenticated alice, one `nc` as anonymous bob. Each side sees what the other becomes.
 
 ```bash
@@ -149,58 +151,57 @@ The fork's data dir is wiped on every `start-ergo.sh`, so we need to create Alic
 
 Look for `REGISTER SUCCESS Alice :Account successfully registered` in the output. Alice's account now exists in the fork's BoltDB until the next `start-ergo.sh` wipes it.
 
-#### Step 1: connect Alice via nc with SASL
+#### Step 1: connect Alice via weechat with SASL
 
-Open a long-lived nc session for alice; we'll drive the SASL handshake by hand and then chat interactively.
+Alice's session needs to stay alive across steps 3–5 (chat, observe tags, attempt nick change). For that we want a real client — `nc` doesn't auto-reply to the server's `PING` keepalive and the session would silently die after a few minutes of slow reading. weechat handles PING/PONG transparently.
 
-```bash
-# Terminal B — open the connection. Leave it running.
-nc -C localhost 16672
-```
-
-Now paste this block of lines into the nc session (everything from `CAP LS 302` through `CAP END`):
+Configure weechat to authenticate as Alice using SASL PLAIN, request the relevant caps, then connect:
 
 ```
-CAP LS 302
-NICK Alice
-USER Alice 0 * :Alice
-CAP REQ :sasl account-tag server-time message-tags echo-message
-AUTHENTICATE PLAIN
-AUTHENTICATE AEFsaWNlAGh1bnRlcjI=
-CAP END
+weechat
+/server add agentirc localhost/16672 -notls
+/set irc.server.agentirc.sasl_mechanism plain
+/set irc.server.agentirc.sasl_username Alice
+/set irc.server.agentirc.sasl_password hunter2
+/set irc.server.agentirc.capabilities account-tag,server-time,message-tags,echo-message
+/connect agentirc
 ```
 
-That's seven lines, paste-friendly. The base64 blob `AEFsaWNlAGh1bnRlcjI=` is `\0Alice\0hunter2` — the SASL PLAIN credential format from RFC 4616. (To compute it yourself: `printf '\0Alice\0hunter2' | base64`.)
-
-You'll see the server's responses interleaved as you paste. Look for **900** and **903** in the output:
+Press **`Alt+R`** (or `/server raw`) to open the raw IRC buffer. Scroll to the top to see the full SASL handshake:
 
 ```
-:ergo.test CAP * LS * :... sasl=PLAIN,EXTERNAL,SCRAM-SHA-256,ERC8004 ...
-:ergo.test CAP * ACK :sasl account-tag server-time message-tags echo-message
-AUTHENTICATE +
-:ergo.test 900 Alice Alice!~u@host Alice :You are now logged in as Alice    ← bound to account
-:ergo.test 903 Alice :SASL authentication successful                         ← SASL done
-:ergo.test 001 Alice :Welcome to the ErgoTest IRC Network Alice              ← registration done
-:ergo.test 002 Alice :Your host is ergo.test, ...
-:ergo.test 005 Alice ...
-... (more welcome numerics)
+--> CAP LS 302
+<-- :ergo.test CAP * LS * :... sasl=PLAIN,EXTERNAL,SCRAM-SHA-256,ERC8004 ...
+--> CAP REQ :sasl account-tag server-time message-tags echo-message
+<-- :ergo.test CAP * ACK :sasl account-tag server-time message-tags echo-message
+--> AUTHENTICATE PLAIN
+<-- AUTHENTICATE +                                         # server ready
+--> AUTHENTICATE AEFsaWNlAGh1bnRlcjI=                      # base64("\0Alice\0hunter2")
+<-- :ergo.test 900 Alice Alice!~u@host Alice :You are now logged in as Alice
+<-- :ergo.test 903 Alice :SASL authentication successful
+--> CAP END
+<-- :ergo.test 001 Alice :Welcome ...
 ```
 
-The 900/903 numerics are the deliverable of the chapter. Past 903, this session is permanently bound to account `Alice`. Leave the nc session open — alice will JOIN and chat from this terminal in steps 3-5.
+The 900/903 numerics are the deliverable of the chapter. Past 903, this session is permanently bound to account `Alice`.
 
-> **Want to use weechat instead?** The configured-SASL alternative:
+> **Want to see exactly what weechat is sending?** The same handshake driven by `nc` is a 7-line paste block:
 >
-> ```
-> weechat
-> /server add agentirc localhost/16672 -notls
-> /set irc.server.agentirc.sasl_mechanism plain
-> /set irc.server.agentirc.sasl_username Alice
-> /set irc.server.agentirc.sasl_password hunter2
-> /set irc.server.agentirc.capabilities account-tag,server-time,message-tags,echo-message
-> /connect agentirc
+> ```bash
+> nc -C localhost 16672
 > ```
 >
-> Then `Alt+R` to see the same handshake in the raw buffer.
+> ```
+> CAP LS 302
+> NICK Alice
+> USER Alice 0 * :Alice
+> CAP REQ :sasl account-tag server-time message-tags echo-message
+> AUTHENTICATE PLAIN
+> AUTHENTICATE AEFsaWNlAGh1bnRlcjI=
+> CAP END
+> ```
+>
+> The base64 blob is `\0Alice\0hunter2` — the SASL PLAIN credential format from RFC 4616. (Compute it yourself: `printf '\0Alice\0hunter2' | base64`.) You'll see `AUTHENTICATE +`, `900`, `903`, `001` come back. Use this to demonstrate the protocol; switch to weechat for the long-lived session in steps 3–5 because nc won't auto-reply to keepalive PINGs.
 
 #### Step 2: connect Bob via nc (no auth)
 
@@ -223,14 +224,14 @@ This makes the asymmetry sharp: bob and alice both REQ `account-tag`. The *only*
 
 #### Step 3: alice joins, sends a message
 
-Back in alice's nc (terminal B), type:
+Back in weechat:
 
 ```
-JOIN #demo
-PRIVMSG #demo :hi everyone
+/join #demo
+hi everyone
 ```
 
-Look at Bob's terminal C. He sees:
+Look at Bob's nc (terminal C). He sees:
 
 ```
 @account=Alice;msgid=...;time=2026-04-29T...   :Alice!~u@... PRIVMSG #demo :hi everyone
@@ -238,7 +239,7 @@ Look at Bob's terminal C. He sees:
 
 The `@account=Alice` tag is **server-stamped**. Alice didn't write it; the server added it because her session SASL'd as Alice. **This is the entire deliverable of the chapter.**
 
-(Alice's own nc terminal also sees an echoed copy of her message — that's the `echo-message` cap she REQ'd in step 1. Same wire format with `@account=Alice`, useful for confirming the server accepted what she sent.)
+(In weechat's raw buffer (`Alt+R`) alice also sees her own message echoed back — that's the `echo-message` cap she REQ'd in step 1. Same wire format with `@account=Alice`, useful for confirming the server accepted what she sent.)
 
 #### Step 4: bob sends a message
 
@@ -248,7 +249,7 @@ In Bob's nc (terminal C):
 PRIVMSG #demo :hi back
 ```
 
-In alice's nc (terminal B), her view of bob's message:
+In weechat's raw buffer (`Alt+R`), alice's view of bob's message:
 
 ```
 @msgid=...;time=2026-04-29T...   :bob!~u@... PRIVMSG #demo :hi back
@@ -260,10 +261,10 @@ That asymmetry — alice's messages are authenticated-attributed, bob's aren't �
 
 #### Step 5 (bonus): alice tries to change nick
 
-In alice's nc:
+In weechat:
 
 ```
-NICK alice2
+/nick alice2
 ```
 
 Ergo (with `force-nick-equals-account` on, the default) refuses:

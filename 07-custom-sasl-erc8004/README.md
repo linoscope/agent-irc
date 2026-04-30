@@ -1,6 +1,8 @@
 # Chapter 07 — Custom SASL mechanism (off-chain)
 
-The chapter where `agent-irc-ergo` becomes meaningfully different from upstream Ergo. We add a new SASL mechanism — `ERC8004` — that authenticates an IRC session by having the client sign a server-issued nonce with their Ethereum wallet keypair. No on-chain check yet (chapter 08 brings that); we just prove the signature path works end-to-end.
+The chapter where `agent-irc-ergo` becomes meaningfully different from upstream Ergo. We add a new SASL mechanism — `ERC8004` — that authenticates an IRC session by having the client sign a server-issued nonce with their Ethereum wallet keypair. **No on-chain check yet**; we just prove the signature path works end-to-end. The on-chain piece arrives in chapter 08b (with chapter 08a as the hands-on tour of the registry contract).
+
+> **Heads-up on chapter ordering**: the mechanism is *named* `ERC8004` because chapter 08b will gate it on the registry of that name — but chapter 07 implements only the off-chain crypto half. If you'd rather understand ERC-8004 the contract first, jump to [chapter 08a](../08a-erc8004-by-hand) for ~10 minutes of `cast` recipes and come back. The two chapters are independently readable.
 
 After this chapter, **wallet keypair = IRC identity**. No passwords, no certs. The wallet *is* the credential.
 
@@ -93,7 +95,7 @@ About 200 lines of new code, 4 lines of changes to existing files, plus the go-e
 
 Three things, addressed in chapters 08-10:
 
-1. **Any wallet works.** A keypair generated 200ms before the connection authenticates fine. There's no notion of "registered agent" — that's chapter 08.
+1. **Any wallet works.** A keypair generated 200ms before the connection authenticates fine. There's no notion of "registered agent" — that's chapter 08b. Chapter 08a is a hands-on tour of the registry contract you'll be querying.
 2. **Account name is just the truncated address.** `0xC502FEA9b3477878` is unmemorable. Chapter 09 replaces this with the on-chain registered name.
 3. **Nonce isn't bound to the deployment.** A signature for one server-id could replay against another. Chapter 10 binds the body to `(chain_id, server_name, nonce)`.
 
@@ -283,7 +285,7 @@ Three things it does not prove:
 2. **The "owner."** Wallets can be hot, custodied, multi-sig, or compromised. Possession of the signing key is not a statement about who, in human terms, controls it.
 3. **Anything on-chain.** Chapter 07 doesn't read the chain. The address can be a fresh keypair generated 200 ms before the connection — there's no notion of "registered agent" yet.
 
-This last point is what chapter 08 fixes. The threat model after chapter 07 is "anyone with any keypair can join" — useful for a development substrate, useless for a production network with paying agents. Chapter 08 raises the bar to "anyone whose address appears in the ERC-8004 registry can join."
+This last point is what chapter 08b fixes. The threat model after chapter 07 is "anyone with any keypair can join" — useful for a development substrate, useless for a production network with paying agents. Chapter 08b raises the bar to "anyone whose address appears in the ERC-8004 registry can join."
 
 A second-order concern: **timing.** Our nonce is 32 random bytes, but we don't bind it to anything else — server identity, connection ID, expiry. A malicious entity proxying connections could route alice's challenge to bob, get bob's signature, and present it back — *if* alice and bob were both expected to sign the same domain `agent-irc-sasl-v1`. To prevent this we'd want to encode the server identity into the body:
 
@@ -320,4 +322,4 @@ go.mod / go.sum / vendor/    # +go-ethereum
 
 ## Next
 
-[Chapter 08 — Gating on the registry](../08-gating-on-the-registry) — we wrap the `VerifyChallenge` call with an on-chain ERC-8004 lookup against Base mainnet (via a forked anvil for local testing). Successful signatures from non-registered addresses get 904 ERR_SASLFAIL. We deploy a reference Identity Registry contract to a local Base fork, register one agent, and test end-to-end.
+[Chapter 08a — ERC-8004 by hand](../08a-erc8004-by-hand) (then [Chapter 08b — Gating on the registry](../08b-gating-on-the-registry)) — we wrap the `VerifyChallenge` call with an on-chain ERC-8004 lookup against Base mainnet (via a forked anvil for local testing). Successful signatures from non-registered addresses get 904 ERR_SASLFAIL. We deploy a reference Identity Registry contract to a local Base fork, register one agent, and test end-to-end.

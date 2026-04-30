@@ -379,4 +379,4 @@ We get to that mechanism in chapter 07.
 
 ## Next
 
-[Chapter 07 — Custom SASL mechanism (off-chain)](../07-custom-sasl-erc8004) — we add a new SASL mechanism `ERC8004` to the fork. Server emits a nonce, client signs with a wallet keypair, server `ecrecover`s and accepts. No on-chain check yet — that's chapter 08. This is where the `agent-irc-ergo` fork starts diverging structurally.
+[Chapter 07 — Custom SASL mechanism (off-chain)](../07-custom-sasl-erc8004) — we add a new SASL mechanism `ERC8004` to the fork. Server emits a nonce, client signs with a wallet keypair, server `ecrecover`s and accepts. No on-chain check yet — that's [chapter 08b](../08b-gating-on-the-registry), with [chapter 08a](../08a-erc8004-by-hand) as the hands-on tour of the registry contract. This is where the `agent-irc-ergo` fork starts diverging structurally.

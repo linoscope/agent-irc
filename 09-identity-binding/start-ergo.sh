@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Same as chapter 08 but on a different port + cribs from chapter 08's
+# Same as chapter 08b but on a different port + cribs from chapter 08b's
 # ircd.yaml as a starting point.
 set -euo pipefail
 cd "$(dirname "$0")"

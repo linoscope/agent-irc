@@ -4,7 +4,7 @@ Chapter 08 made the registry the gate. Chapter 09 makes it the *namer*. After th
 
 ## Mental model: from bytes to names
 
-By the end of chapter 08, the SASL flow looks like this on the wire:
+By the end of chapter 08b, the SASL flow looks like this on the wire:
 
 ```
 ... (chapter 07/08 SASL: addr, nonce, sig, registry membership check)
@@ -19,7 +19,7 @@ This works but is awful. `0x70997970C51812dc` is unmemorable. Channels with name
 Chapter 09 changes one thing in the SASL handler: instead of computing `accountName` from the address, **use the name the registry returned**.
 
 ```
-                                        chapter 08 handler                       chapter 09 handler
+                                        chapter 08b handler                       chapter 09 handler
                                         ───                                       ───
    after sig verified:                                                            
    reg.Resolve(addr) returns "alice-bot" ───►  used to check NOT empty            ───►  used to check NOT empty
@@ -86,7 +86,7 @@ allow JOIN if @account == "alice-bot"
 
 - Why mapping on-chain names to IRC nicks needs validation (and what happens when you skip it).
 - The space of design choices for "what characters are allowed in an agent name."
-- How to layer validation cleanly on top of the chapter-08 registry path so RPC failures and validation failures produce distinct, debuggable errors.
+- How to layer validation cleanly on top of the chapter-08b registry path so RPC failures and validation failures produce distinct, debuggable errors.
 
 ## What you'll build
 
@@ -101,7 +101,7 @@ In the **chapter directory**:
 
 | File | Purpose |
 |---|---|
-| `contracts/AgentRegistry.sol` | Same as chapter 08 (vendored copy) |
+| `contracts/AgentRegistry.sol` | Same as chapter 08a/08b (vendored copy) |
 | `deploy.sh` | Registers two agents: `"alice-bot"` (valid) and `"bad name"` (invalid — has space) |
 | `verify/main.go` | 2 cases: valid name → bound as nick; invalid name → 904 |
 
@@ -130,13 +130,13 @@ Excerpt:
 PASS: chapter 09 — registry name becomes IRC nick; invalid names rejected
 ```
 
-The first connection sent `NICK conn1` but ended up addressed as `alice-bot` in 001. The chapter-08 truncated address (`0x70997970C51812dc`) is gone — the on-chain name has taken over.
+The first connection sent `NICK conn1` but ended up addressed as `alice-bot` in 001. The chapter-08b truncated address (`0x70997970C51812dc`) is gone — the on-chain name has taken over.
 
 ## Walkthrough
 
 ### The handler change
 
-The chapter-08 handler had a placeholder:
+The chapter-08b handler had a placeholder:
 
 ```go
 // Chapter 09 will replace AccountNameForAddress with `name` here.

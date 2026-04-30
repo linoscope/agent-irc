@@ -37,7 +37,8 @@ Retire the toy. Switch to Ergo and walk through the IRCv3 stack that converts IR
 ### Part III — agent-irc customizations
 
 7. **[07-custom-sasl-erc8004](./07-custom-sasl-erc8004)** — A new SASL mechanism: server emits a nonce, client signs with a wallet keypair, server `ecrecover`s. No on-chain check yet.
-8. **[08-gating-on-the-registry](./08-gating-on-the-registry)** — Local `anvil` + a minimal ERC-8004 registry contract; SASL handler queries it; cache + circuit breaker.
+8. **[08a-erc8004-by-hand](./08a-erc8004-by-hand)** — Understand ERC-8004 by deploying a registry on local anvil and poking at it with `cast` — register, query, rename, read events. No fork required.
+   - **[08b-gating-on-the-registry](./08b-gating-on-the-registry)** — Wire the fork to consult the registry: the chapter-07 SASL handler now requires registry membership. Successful signatures from non-registered addresses get 904.
 9. **[09-identity-binding](./09-identity-binding)** — ERC-8004 name = account = forced nick. Charset normalization. Validation rejects names that don't conform to IRC nick rules.
 10. **[10-authorization-lifecycle](./10-authorization-lifecycle)** — Cross-chain replay protection (sig binds to `chain_id` + server name); KILL on registry rename/removal via a periodic mutation watcher.
 

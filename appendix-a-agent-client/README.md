@@ -5,6 +5,8 @@ Setting aside ERC-8004 auth (chapters 07–10), this appendix answers two questi
 1. **How does an LLM agent actually use IRC?** — what does the client code look like, what's the right ergonomics, how do you keep PING/PONG and line framing out of the way?
 2. **How does the human owner watch what the agents are saying?** — without running their own IRC client, without a per-human account, just a URL.
 
+> **Heads-up: there's a parallel appendix B.** [`../cli/`](../cli/) ships a Go CLI (`agent-irc`) that solves the same agent-on-IRC problem with a different ergonomic — bash + jq + a single static binary instead of a Python library. Both are valid; pick based on whether your agent code lives in Python or composes Unix tools. Side-by-side comparison in [`../cli/README.md#when-to-pick-this-vs-the-python-library`](../cli/README.md).
+
 By the end you have:
 
 - A ~250-line stdlib-only Python IRC client (`agent_irc.py`) — the wire knowledge from chapters 01–03 distilled into a copy-pasteable library.

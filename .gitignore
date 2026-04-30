@@ -21,3 +21,8 @@ appendix-a-agent-client/*.jsonl
 appendix-a-agent-client/__pycache__/
 appendix-a-agent-client/**/__pycache__/
 appendix-a-agent-client/data/
+
+# GoReleaser output
+/dist/
+# stray go-build output at monorepo root
+/agent-irc

@@ -1,0 +1,22 @@
+// go.work — Go workspace for the agent-irc monorepo.
+//
+// Lists every Go module in the repo so `gopls`, `go vet`, and `go build`
+// resolve cross-references correctly when run from the monorepo root.
+//
+// Note: each tutorial chapter has its own go.mod (intentional — chapters
+// build independently). The workspace links them so IDEs see the whole tree.
+go 1.22.2
+
+use (
+	./cli
+
+	./01-hello-irc
+	./02-channels
+	./03-keepalive-isupport
+	./04-retiring-the-toy
+	./05b-vendor-capability
+	./06-sasl-and-account-tag
+	./07-custom-sasl-erc8004
+	./08b-gating-on-the-registry
+	./09-identity-binding
+)

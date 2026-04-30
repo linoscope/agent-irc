@@ -42,6 +42,11 @@ Retire the toy. Switch to Ergo and walk through the IRCv3 stack that converts IR
 9. **[09-identity-binding](./09-identity-binding)** — ERC-8004 name = account = forced nick. Charset normalization. Validation rejects names that don't conform to IRC nick rules.
 10. **[10-authorization-lifecycle](./10-authorization-lifecycle)** — Cross-chain replay protection (sig binds to `chain_id` + server name); KILL on registry rename/removal via a periodic mutation watcher.
 
+### Appendices
+
+- **[appendix-a-agent-client](./appendix-a-agent-client)** — A self-contained Python library + LLM-driven agent runner + Flask + SSE public viewer. The "Python ergonomic" path: agents `import agent_irc` and write Python scripts. Set aside ERC-8004 — works against any IRC server.
+- **[appendix-b-agent-irc-cli](./appendix-b-agent-irc-cli)** → see **[`cli/`](./cli)** — A single Go binary (`agent-irc`) that exposes the same operations as a `gh`-style command-line tool. The "bash ergonomic" path: agents compose `agent-irc send`, `agent-irc tail`, and `jq` in shell scripts. Includes [JOINING.md](./cli/JOINING.md) for visitors and [HOSTING.md](./cli/HOSTING.md) for operators.
+
 ## Prerequisites
 
 | Tool | Purpose | Install |
@@ -65,11 +70,23 @@ The `start-ergo.sh` scripts in chapters 04–10 already set this. If you're on G
 
 ## Repository layout
 
-This tutorial assumes three sibling directories under `~/workspace/`:
+This is a monorepo. Inside `~/workspace/agent-irc/`:
+
+| Path | What |
+|---|---|
+| `01-hello-irc/` … `10-authorization-lifecycle/` | The tutorial chapters, each its own self-contained Go module + verify |
+| `appendix-a-agent-client/` | Python library + viewer + LLM agent runner (the "Python ergonomic" agent client) |
+| `cli/` | The Go `agent-irc` CLI binary (the "bash ergonomic" agent client) |
+| `appendix-b-agent-irc-cli/` | Thin pointer doc to `cli/` (kept for tutorial-side appendix consistency) |
+| `ergo/` | Pointer to the agent-irc-ergo fork (currently lives separately at `~/workspace/agent-irc-ergo/`; future: integrated via git subtree) |
+| `.goreleaser.yaml` | Release pipeline for the Go CLI |
+| `.github/workflows/` | CI for the CLI |
+| `go.work` | Go workspace tying every module together for IDE navigation |
+
+Two sibling directories the tutorial expects:
 
 | Path | What | When you need it |
 |---|---|---|
-| `~/workspace/agent-irc/` | This tutorial repo (you are here) | Always |
 | `~/workspace/ergo/` | A clone of upstream [ergochat/ergo](https://github.com/ergochat/ergo) | Chapter 04 (the read-only "real Ergo" build) |
 | `~/workspace/agent-irc-ergo/` | Our fork of Ergo with the agent-irc customizations | Chapters 05–10 |
 

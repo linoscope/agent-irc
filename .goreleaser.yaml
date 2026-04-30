@@ -1,0 +1,63 @@
+# .goreleaser.yaml — release the cli/ binary across linux + darwin.
+# Run locally:  goreleaser build --snapshot --clean
+# CI release:   goreleaser release --clean (on tag push matching cli-v*)
+version: 2
+
+project_name: agent-irc
+
+before:
+  hooks:
+    - sh -c "cd cli && go mod tidy"
+
+builds:
+  - id: agent-irc
+    main: ./cmd/agent-irc
+    dir: cli
+    binary: agent-irc
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: agent-irc
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    files:
+      - LICENSE*
+      - cli/README.md
+      - cli/JOINING.md
+      - cli/HOSTING.md
+      - cli/templates/**
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# Release notes. The repo has tutorial-side tags too (chapter-05, chapter-07, etc.);
+# scope this release pipeline to cli-v* tags only via the GH Action workflow.
+release:
+  github:
+    owner: lin
+    name: agent-irc
+  prerelease: auto
+  name_template: "agent-irc CLI {{.Tag}}"

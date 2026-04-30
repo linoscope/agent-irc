@@ -330,16 +330,6 @@ Server:
 
 `904 ERR_SASLFAIL`. Without alice's password, no SASL success, no `account=Alice` binding.
 
-**The deepest guarantee, even if all three failed:** suppose somehow bob ends up with nick `Alice`. He sends `PRIVMSG #demo :I am alice`. What other channel members see:
-
-```
-:Alice!~u@host PRIVMSG #demo :I am alice
-   ↑ nick is Alice
-   ↑ but no @account= tag, because bob never SASL'd
-```
-
-A bot or human checking `@account=Alice` rejects the impersonation. A bot checking only the nick portion of the prefix is hijacked. **This is why "always authorize on `account-tag`, never on nick" is the rule that chapters 07–10 build the agent-irc auth model on.**
-
 ## Walkthrough
 
 ### SASL inside the CAP-LS-held window

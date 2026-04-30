@@ -334,7 +334,17 @@ Server:
 
 ### SASL inside the CAP-LS-held window
 
-The whole point of CAP LS 302 holding registration open (chapter 05a) is to give SASL somewhere to run. The flow:
+`CAP LS 302` makes the server **defer emitting `001 RPL_WELCOME`** until the client sends `CAP END`. That defer opens a window after `NICK`/`USER` but before "session is registered." SASL runs *inside* that window so the account binding is established *before* the session can send a single message — every message the session ever sends carries the right `@account=` from the start.
+
+If SASL ran *after* `001` instead (the way pre-IRCv3 NickServ authentication did, via `PRIVMSG NickServ :IDENTIFY ...`), three things would go wrong:
+
+1. **`account-tag` would have a retroactivity problem.** The session's first messages would be untagged (no auth yet); later ones would be tagged. Different identity guarantees on the same session, depending on when you joined the channel.
+2. **Authorization on first events would have nothing to read.** A bot gating JOIN on `account=alice` would have to defer or refuse the JOIN, wait for auth to maybe complete, then retroactively decide. No clean state machine.
+3. **The same nick could mean different identities mid-session.** If alice's session was anonymous before NickServ-IDENTIFY and authenticated after, observers would have to track "is this the auth'd alice or pre-auth alice" — exactly the ambiguity `account-tag` is meant to remove.
+
+Doing SASL inside the CAP window cleans all three up: the binding exists before any user-visible activity, so `@account=alice` is correct from the very first message.
+
+The flow:
 
 ```
   C -> CAP LS 302

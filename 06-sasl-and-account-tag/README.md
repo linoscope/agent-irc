@@ -30,7 +30,9 @@ The `account=alice` tag is **server-attested**. The client did not write it. The
 
 ### How does the session "previously authenticate"?
 
-SASL — the authentication framework — runs *inside* the CAP-LS-held registration window from chapter 05a. The whole flow:
+**SASL** — **S**imple **A**uthentication and **S**ecurity **L**ayer (RFC 4422) — is the standard "plug an auth mechanism into a stateful protocol" framework. SMTP, IMAP, LDAP, XMPP, and IRC all use it. SASL by itself doesn't define how authentication works; it defines the **plumbing** for swapping in different authentication mechanisms (PLAIN, EXTERNAL, SCRAM-SHA-256, our `ERC8004`, etc.). The host protocol — IRC in our case — gives SASL a way to ferry opaque bytes back and forth; the chosen mechanism handles the actual credential check.
+
+In IRC, the SASL exchange runs *inside* the CAP-LS-held registration window from chapter 05a. The whole flow:
 
 ```
  1. CAP LS 302                                # trapdoor opens (chapter 05a)

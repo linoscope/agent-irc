@@ -149,37 +149,58 @@ The fork's data dir is wiped on every `start-ergo.sh`, so we need to create Alic
 
 Look for `REGISTER SUCCESS Alice :Account successfully registered` in the output. Alice's account now exists in the fork's BoltDB until the next `start-ergo.sh` wipes it.
 
-#### Step 1: connect Alice via weechat with SASL
+#### Step 1: connect Alice via nc with SASL
 
-Configure weechat to authenticate as Alice using SASL PLAIN, request the relevant caps, then connect:
+Open a long-lived nc session for alice; we'll drive the SASL handshake by hand and then chat interactively.
 
-```
-weechat
-/server add agentirc localhost/16672 -notls
-/set irc.server.agentirc.sasl_mechanism plain
-/set irc.server.agentirc.sasl_username Alice
-/set irc.server.agentirc.sasl_password hunter2
-/set irc.server.agentirc.capabilities account-tag,server-time,message-tags,echo-message
-/connect agentirc
+```bash
+# Terminal B — open the connection. Leave it running.
+nc -C localhost 16672
 ```
 
-Press **`Alt+R`** (or `/server raw`) to open the raw IRC buffer. Scroll to the top to see the full SASL handshake:
+Now paste this block of lines into the nc session (everything from `CAP LS 302` through `CAP END`):
 
 ```
---> CAP LS 302
-<-- :ergo.test CAP * LS * :... sasl=PLAIN,EXTERNAL,SCRAM-SHA-256,ERC8004 ...
---> CAP REQ :sasl account-tag server-time message-tags echo-message
-<-- :ergo.test CAP * ACK :sasl account-tag server-time message-tags echo-message
---> AUTHENTICATE PLAIN
-<-- AUTHENTICATE +                                         # server ready
---> AUTHENTICATE AEFsaWNlAGh1bnRlcjI=                      # base64("\0Alice\0hunter2")
-<-- :ergo.test 900 Alice Alice!~u@host Alice :You are now logged in as Alice
-<-- :ergo.test 903 Alice :SASL authentication successful
---> CAP END
-<-- :ergo.test 001 Alice :Welcome ...
+CAP LS 302
+NICK Alice
+USER Alice 0 * :Alice
+CAP REQ :sasl account-tag server-time message-tags echo-message
+AUTHENTICATE PLAIN
+AUTHENTICATE AEFsaWNlAGh1bnRlcjI=
+CAP END
 ```
 
-The 900/903 numerics are the deliverable of the chapter. Past 903, this session is permanently bound to account `Alice`.
+That's seven lines, paste-friendly. The base64 blob `AEFsaWNlAGh1bnRlcjI=` is `\0Alice\0hunter2` — the SASL PLAIN credential format from RFC 4616. (To compute it yourself: `printf '\0Alice\0hunter2' | base64`.)
+
+You'll see the server's responses interleaved as you paste. Look for **900** and **903** in the output:
+
+```
+:ergo.test CAP * LS * :... sasl=PLAIN,EXTERNAL,SCRAM-SHA-256,ERC8004 ...
+:ergo.test CAP * ACK :sasl account-tag server-time message-tags echo-message
+AUTHENTICATE +
+:ergo.test 900 Alice Alice!~u@host Alice :You are now logged in as Alice    ← bound to account
+:ergo.test 903 Alice :SASL authentication successful                         ← SASL done
+:ergo.test 001 Alice :Welcome to the ErgoTest IRC Network Alice              ← registration done
+:ergo.test 002 Alice :Your host is ergo.test, ...
+:ergo.test 005 Alice ...
+... (more welcome numerics)
+```
+
+The 900/903 numerics are the deliverable of the chapter. Past 903, this session is permanently bound to account `Alice`. Leave the nc session open — alice will JOIN and chat from this terminal in steps 3-5.
+
+> **Want to use weechat instead?** The configured-SASL alternative:
+>
+> ```
+> weechat
+> /server add agentirc localhost/16672 -notls
+> /set irc.server.agentirc.sasl_mechanism plain
+> /set irc.server.agentirc.sasl_username Alice
+> /set irc.server.agentirc.sasl_password hunter2
+> /set irc.server.agentirc.capabilities account-tag,server-time,message-tags,echo-message
+> /connect agentirc
+> ```
+>
+> Then `Alt+R` to see the same handshake in the raw buffer.
 
 #### Step 2: connect Bob via nc (no auth)
 
@@ -202,11 +223,11 @@ This makes the asymmetry sharp: bob and alice both REQ `account-tag`. The *only*
 
 #### Step 3: alice joins, sends a message
 
-Back in weechat:
+Back in alice's nc (terminal B), type:
 
 ```
-/join #demo
-hi everyone
+JOIN #demo
+PRIVMSG #demo :hi everyone
 ```
 
 Look at Bob's terminal C. He sees:
@@ -217,15 +238,17 @@ Look at Bob's terminal C. He sees:
 
 The `@account=Alice` tag is **server-stamped**. Alice didn't write it; the server added it because her session SASL'd as Alice. **This is the entire deliverable of the chapter.**
 
+(Alice's own nc terminal also sees an echoed copy of her message — that's the `echo-message` cap she REQ'd in step 1. Same wire format with `@account=Alice`, useful for confirming the server accepted what she sent.)
+
 #### Step 4: bob sends a message
 
-In Bob's nc:
+In Bob's nc (terminal C):
 
 ```
 PRIVMSG #demo :hi back
 ```
 
-In weechat's raw buffer (`Alt+R`), Alice's view of bob's message:
+In alice's nc (terminal B), her view of bob's message:
 
 ```
 @msgid=...;time=2026-04-29T...   :bob!~u@... PRIVMSG #demo :hi back
@@ -237,14 +260,16 @@ That asymmetry — alice's messages are authenticated-attributed, bob's aren't �
 
 #### Step 5 (bonus): alice tries to change nick
 
+In alice's nc:
+
 ```
-/nick alice2
+NICK alice2
 ```
 
 Ergo (with `force-nick-equals-account` on, the default) refuses:
 
 ```
-<-- :ergo.test 400 Alice NICK :You must use your account name as your nickname
+:ergo.test 400 Alice NICK :You must use your account name as your nickname
 ```
 
 (The exact numeric varies by ircd — Ergo emits `400`; other implementations may use `432 ERR_ERRONEUSNICKNAME` or `447 ERR_NONICKCHANGE`. The behavior is what matters: authenticated sessions can't escape their account name. Chapter 09 makes this property load-bearing for ERC-8004 binding.)

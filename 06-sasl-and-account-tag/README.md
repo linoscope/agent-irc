@@ -218,8 +218,8 @@ CAP REQ :account-tag message-tags server-time
 CAP END
                             # wait for 001
 JOIN #demo
-``
-`
+```
+
 This makes the asymmetry sharp: bob and alice both REQ `account-tag`. The *only* difference is alice did SASL inside her CAP window and bob didn't.
 
 #### Step 3: alice joins, sends a message

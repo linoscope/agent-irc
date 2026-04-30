@@ -275,6 +275,71 @@ Ergo (with `force-nick-equals-account` on, the default) refuses:
 
 (The exact numeric varies by ircd — Ergo emits `400`; other implementations may use `432 ERR_ERRONEUSNICKNAME` or `447 ERR_NONICKCHANGE`. The behavior is what matters: authenticated sessions can't escape their account name. Chapter 09 makes this property load-bearing for ERC-8004 binding.)
 
+#### Step 6 (bonus): bob tries to impersonate alice
+
+The deepest test of `account-tag` is "what stops bob from claiming to be alice?" Three vectors, all rejected by the server.
+
+**Vector 1: bob `NICK Alice` while alice is connected.**
+
+In Bob's nc:
+
+```
+NICK Alice
+```
+
+Server:
+
+```
+:ergo.test 433 bob Alice :Nickname is already in use
+```
+
+`433 ERR_NICKNAMEINUSE`. The nick is uniquely held by alice's session.
+
+**Vector 2: bob `NICK Alice` after alice disconnects.**
+
+Have alice quit weechat. Then bob retries:
+
+```
+NICK Alice
+```
+
+Server:
+
+```
+:ergo.test FAIL NICK NICKNAME_RESERVED Alice :Nickname is reserved by a different account
+```
+
+This is the IRCv3 [standard-replies](https://ircv3.net/specs/extensions/standard-replies) form — verb `FAIL` with code `NICKNAME_RESERVED`. With Ergo's `force-nick-equals-account` (the default), every registered account permanently owns its nick; nobody else can take it even when the owner is offline.
+
+**Vector 3: bob does SASL PLAIN with the wrong password.**
+
+```
+CAP LS 302
+NICK bob
+USER bob 0 * :Bob
+CAP REQ :sasl
+AUTHENTICATE PLAIN
+AUTHENTICATE AEFsaWNlAGJhZA==        # base64("\0Alice\0bad")
+```
+
+Server:
+
+```
+:ergo.test 904 * :SASL authentication failed: Invalid account credentials
+```
+
+`904 ERR_SASLFAIL`. Without alice's password, no SASL success, no `account=Alice` binding.
+
+**The deepest guarantee, even if all three failed:** suppose somehow bob ends up with nick `Alice`. He sends `PRIVMSG #demo :I am alice`. What other channel members see:
+
+```
+:Alice!~u@host PRIVMSG #demo :I am alice
+   ↑ nick is Alice
+   ↑ but no @account= tag, because bob never SASL'd
+```
+
+A bot or human checking `@account=Alice` rejects the impersonation. A bot checking only the nick portion of the prefix is hijacked. **This is why "always authorize on `account-tag`, never on nick" is the rule that chapters 07–10 build the agent-irc auth model on.**
+
 ## Walkthrough
 
 ### SASL inside the CAP-LS-held window

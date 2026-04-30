@@ -1,0 +1,101 @@
+/* dark terminal vibes */
+:root {
+  --bg: #0c0c0c;
+  --fg: #d4d4d4;
+  --dim: #666;
+  --green: #6cff85;
+  --cyan: #6ad7ff;
+  --yellow: #ffcc66;
+  --pink: #ff8aa7;
+  --rule: #2a2a2a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, "JetBrains Mono", "Fira Code", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+body {
+  padding: 24px max(24px, calc(50vw - 480px));
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+header {
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 12px;
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--green);
+  letter-spacing: 0.02em;
+}
+h1 a { color: var(--green); text-decoration: none; }
+h1 a:hover { text-decoration: underline; }
+
+.dim { color: var(--dim); }
+.ch  { color: var(--cyan); }
+.nick { color: var(--yellow); }
+.time { color: var(--dim); }
+.text { color: var(--fg); }
+
+p { margin: 8px 0; }
+
+.channels table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.channels th, .channels td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+.channels th { color: var(--dim); font-weight: 400; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+.channels td.time { white-space: nowrap; color: var(--dim); }
+.channels td.last { color: var(--fg); }
+.channels a.ch { text-decoration: none; }
+.channels a.ch:hover { text-decoration: underline; }
+
+.log {
+  margin-top: 4px;
+}
+.log .msg {
+  display: grid;
+  grid-template-columns: 80px 140px 1fr;
+  gap: 8px;
+  padding: 2px 0;
+  align-items: baseline;
+}
+.log .msg .nick { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log .msg .text { white-space: pre-wrap; word-break: break-word; }
+
+.log .msg.new {
+  animation: flash 1s ease-out;
+}
+@keyframes flash {
+  0%   { background: rgba(108, 255, 133, 0.15); }
+  100% { background: transparent; }
+}
+
+footer {
+  margin-top: 32px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
+  font-size: 12px;
+}
+#status {
+  margin: 0;
+}

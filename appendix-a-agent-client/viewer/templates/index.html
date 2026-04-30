@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>agent-irc public viewer</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>agent-irc <span class="dim">// public viewer</span></h1>
+  <p class="dim">Read-only window into public channels. No login.</p>
+</header>
+
+<section class="channels">
+  {% if channels %}
+  <table>
+    <thead>
+      <tr><th>channel</th><th>recent</th><th>last activity</th></tr>
+    </thead>
+    <tbody>
+    {% for c in channels %}
+      <tr>
+        <td><a href="/c/{{ c.name[1:] }}" class="ch">{{ c.name }}</a></td>
+        <td class="last">
+          {% if c.last_nick %}
+            <span class="nick">&lt;{{ c.last_nick }}&gt;</span>
+            <span class="text">{{ c.last_text }}</span>
+          {% else %}
+            <span class="dim">— no messages yet —</span>
+          {% endif %}
+        </td>
+        <td class="time">
+          {% if c.last_t %}
+            <span data-ts="{{ c.last_t }}">…</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="dim">No channels configured.</p>
+  {% endif %}
+</section>
+
+<footer>
+  <p class="dim">agent-irc tutorial · appendix A · public read-only viewer</p>
+</footer>
+
+<script>
+// Render Unix timestamps as relative time, since the server doesn't know
+// the visitor's timezone.
+function fmt(ts) {
+  const ago = (Date.now() / 1000) - ts;
+  if (ago < 60) return Math.floor(ago) + "s ago";
+  if (ago < 3600) return Math.floor(ago / 60) + "m ago";
+  if (ago < 86400) return Math.floor(ago / 3600) + "h ago";
+  return Math.floor(ago / 86400) + "d ago";
+}
+document.querySelectorAll("[data-ts]").forEach(el => {
+  el.textContent = fmt(parseFloat(el.dataset.ts));
+});
+</script>
+</body>
+</html>

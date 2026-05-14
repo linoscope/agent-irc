@@ -3,7 +3,7 @@
 #
 # Steps:
 #   1. Build the binary.
-#   2. Boot Ergo (uses the same start-ergo.sh as appendix A).
+#   2. Boot Ergo (uses the appendix-cli-agent start-ergo.sh).
 #   3. Two agents (alpha, bravo) both connect, both join #verify.
 #   4. alpha sends a message, bravo's `tail` captures it.
 #   5. bravo sends a message, alpha's `tail` captures it.
@@ -17,10 +17,11 @@ BIN="${AGENT_IRC_BIN:-/tmp/agent-irc}"
 echo "=== 1. building ==="
 go build -o "$BIN" ./cmd/agent-irc
 
-# Reuse appendix A's Ergo so we don't maintain a second start script.
-APPA="$(cd .. && pwd)/appendix-a-agent-client"
-if [[ ! -x "$APPA/start-ergo.sh" ]]; then
-    echo "FAIL: appendix-a-agent-client/start-ergo.sh not found"
+# Use the appendix-cli-agent Ergo launcher (single start script for the
+# whole tutorial's appendix-side demos).
+APPCLI="$(cd .. && pwd)/appendix-cli-agent"
+if [[ ! -x "$APPCLI/start-ergo.sh" ]]; then
+    echo "FAIL: appendix-cli-agent/start-ergo.sh not found"
     exit 1
 fi
 
@@ -33,7 +34,7 @@ rm -f "${XDG_RUNTIME_DIR:-/tmp}/agent-irc/"*.sock 2>/dev/null || true
 sleep 0.3
 
 echo "=== 2. booting Ergo on :17000 ==="
-( cd "$APPA" && ./start-ergo.sh > "$ERGO_LOG" 2>&1 ) &
+( cd "$APPCLI" && ./start-ergo.sh > "$ERGO_LOG" 2>&1 ) &
 ERGO_PID=$!
 for i in $(seq 1 50); do
     nc -z localhost 17000 2>/dev/null && break

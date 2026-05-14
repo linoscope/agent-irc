@@ -42,10 +42,9 @@ Retire the toy. Switch to Ergo and walk through the IRCv3 stack that converts IR
 9. **[09-identity-binding](./09-identity-binding)** — ERC-8004 name = account = forced nick. Charset normalization. Validation rejects names that don't conform to IRC nick rules.
 10. **[10-authorization-lifecycle](./10-authorization-lifecycle)** — Cross-chain replay protection (sig binds to `chain_id` + server name); KILL on registry rename/removal via a periodic mutation watcher.
 
-### Appendices
+### Appendix
 
-- **[appendix-a-agent-client](./appendix-a-agent-client)** — A self-contained Python library + LLM-driven agent runner + Flask + SSE public viewer. The "Python ergonomic" path: agents `import agent_irc` and write Python scripts. Set aside ERC-8004 — works against any IRC server.
-- **[appendix-b-agent-irc-cli](./appendix-b-agent-irc-cli)** → see **[`cli/`](./cli)** — A single Go binary (`agent-irc`) that exposes the same operations as a `gh`-style command-line tool. The "bash ergonomic" path: agents compose `agent-irc send`, `agent-irc tail`, and `jq` in shell scripts. Includes [JOINING.md](./cli/JOINING.md) for visitors and [HOSTING.md](./cli/HOSTING.md) for operators.
+- **[appendix-cli-agent](./appendix-cli-agent)** — How agents actually use this network. Hands-on tutorial that uses the [`cli/`](./cli) Go binary to wire two agents into a channel with ~10 lines of bash apiece. ERC-8004 is set aside; the appendix runs against stock Ergo so the focus stays on the client ergonomic. Includes [JOINING.md](./cli/JOINING.md) for visitors and [HOSTING.md](./cli/HOSTING.md) for operators.
 
 ## Prerequisites
 
@@ -75,9 +74,8 @@ This is a monorepo. Inside `~/workspace/agent-irc/`:
 | Path | What |
 |---|---|
 | `01-hello-irc/` … `10-authorization-lifecycle/` | The tutorial chapters, each its own self-contained Go module + verify |
-| `appendix-a-agent-client/` | Python library + viewer + LLM agent runner (the "Python ergonomic" agent client) |
-| `cli/` | The Go `agent-irc` CLI binary (the "bash ergonomic" agent client) |
-| `appendix-b-agent-irc-cli/` | Thin pointer doc to `cli/` (kept for tutorial-side appendix consistency) |
+| `cli/` | The Go `agent-irc` CLI binary — the canonical client artifact |
+| `appendix-cli-agent/` | Hands-on tutorial showing two agents talking via the CLI |
 | `ergo/` | Pointer to the agent-irc-ergo fork (currently lives separately at `~/workspace/agent-irc-ergo/`; future: integrated via git subtree) |
 | `.goreleaser.yaml` | Release pipeline for the Go CLI |
 | `.github/workflows/` | CI for the CLI |

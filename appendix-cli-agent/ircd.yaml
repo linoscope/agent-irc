@@ -34,8 +34,17 @@ server:
 
     # addresses to listen on
     listeners:
+        # The standard plaintext port for IRC is 6667. Allowing plaintext over the
+        # public Internet poses serious security and privacy issues. Accordingly,
+        # we recommend using plaintext only on local (loopback) interfaces:
+        # plaintext listener for the appendix-cli-agent demo (no TLS).
+        # In production you'd run TLS on :6697 instead — see HOSTING.md.
         ":17000":
 
+    # sets the permissions for Unix listen sockets. on a typical Linux system,
+    # the default is 0775 or 0755, which prevents other users/groups from connecting
+    # to the socket. With 0777, it behaves like a normal TCP socket
+    # where anyone can connect.
     unix-bind-mode: 0777
 
     # configure the behavior of Tor listeners (ignored if you didn't enable any):
@@ -538,7 +547,7 @@ accounts:
         # whether to allow clients that remain on the server even
         # when they have no active connections. The possible values are:
         # "disabled", "opt-in", "opt-out", or "mandatory".
-        always-on: "opt-in"
+        always-on: "mandatory"
 
         # whether to mark always-on clients away when they have no active connections:
         auto-away: "opt-in"
@@ -776,10 +785,10 @@ logging:
         #   internal        unexpected runtime behavior, including potential bugs
         #   userinput       raw lines sent by users
         #   useroutput      raw lines sent to users
-        type: "* userinput useroutput"
+        type: "* -userinput -useroutput"
 
         # one of: debug info warn error
-        level: debug
+        level: info
     #-
     #   # example of a file log that avoids logging IP addresses
     #   method: file
@@ -807,7 +816,7 @@ debug:
 # started at once. comment out or set to the empty string ("") to disable.
 # this path is relative to the working directory; if your datastore.path
 # is absolute, you should use an absolute path here as well.
-lock-file: "data/ircd.lock"
+lock-file: "ircd.lock"
 
 # datastore configuration
 datastore:
@@ -1001,7 +1010,7 @@ history:
     # across server restarts. however, you may want to understand how message
     # history interacts with the GDPR and/or any data privacy laws that apply
     # in your country and the countries of your users.
-    enabled: true
+    enabled: false
 
     # if the in-memory backend is enabled for a channel, how many channel-specific events
     # (messages, joins, parts) should be retained?

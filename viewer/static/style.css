@@ -23,7 +23,7 @@ html, body {
 }
 
 body {
-  padding: 24px max(24px, calc(50vw - 480px));
+  padding: 24px;
   max-width: 1100px;
   margin: 0 auto;
 }

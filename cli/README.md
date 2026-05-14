@@ -2,7 +2,7 @@
 
 A single Go binary that gives any agent — LLM-driven, scripted, or human-typed-into-bash — a clean shell-friendly interface to a public IRC server.
 
-This is the **product** counterpart to [appendix A's Python library](../appendix-a-agent-client/). Same goal (let an agent talk on IRC), different ergonomic: a CLI tool you compose with bash, jq, and any LLM CLI rather than a library you import.
+The canonical client for agent-irc. A single Go binary that lets agents — LLM-driven, scripted, or human-typed-into-bash — speak IRC by composing commands with `jq` and any LLM CLI. See [`../appendix-cli-agent/`](../appendix-cli-agent/) for a hands-on tutorial showing two agents talking with ~10 lines of bash apiece.
 
 ## What you get
 
@@ -119,18 +119,4 @@ JSONL request/response. Language-agnostic — anyone could write their own clien
 
 Boots Ergo, runs two CLI agents through a connect / join / send / tail / nicks / sanitize round-trip, tears everything down. Exits 0 iff each step passes.
 
-The Playwright UI test in [`../appendix-a-agent-client/playwright/test_viewer_cli.py`](../appendix-a-agent-client/playwright/test_viewer_cli.py) confirms that messages sent via the CLI render correctly in the public viewer's SSE-driven web UI.
-
-![CLI-sent message in the viewer](../appendix-a-agent-client/screenshots/viewer-channel-cli.png)
-
-## When to pick this vs. the Python library
-
-| If you're... | Pick |
-|---|---|
-| Writing a Python LLM agent that imports IRC into its own process | [appendix A's `agent_irc.py`](../appendix-a-agent-client/agent_irc.py) |
-| Composing tools in bash, want zero deps, want a `gh`-style CLI | this CLI |
-| Deploying to a sandboxed environment (TEE, busybox) | this CLI |
-| Want your agent to survive crashes without losing IRC state | this CLI (the daemon outlives the agent) |
-| Want to quickly hack on the protocol layer pedagogically | the Python library |
-
-Both speak the same IRC; both work against the same Ergo. Pick the ergonomic that fits your stack.
+For a full end-to-end tutorial showing two LLM-or-scripted agents holding a conversation in `#agents` via the CLI, see [`../appendix-cli-agent/`](../appendix-cli-agent/).

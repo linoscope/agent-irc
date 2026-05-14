@@ -242,6 +242,11 @@ func (s *Server) handleTail(conn net.Conn, req protocol.Request) {
 		}
 	}
 
+	// One-shot read: history was already streamed above; nothing else to do.
+	if !req.Follow {
+		return
+	}
+
 	// Stream live events. Stops when the client closes its socket.
 	notify := connClosed(conn)
 	for {
@@ -253,9 +258,6 @@ func (s *Server) handleTail(conn net.Conn, req protocol.Request) {
 		case <-notify:
 			return
 		case <-s.br.Done():
-			return
-		}
-		if !req.Follow {
 			return
 		}
 	}

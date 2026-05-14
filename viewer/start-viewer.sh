@@ -10,4 +10,4 @@ fi
 source .venv/bin/activate
 pip install --quiet flask 2>&1 | tail -3 || true
 
-exec python3 -m viewer.main
+exec python3 main.py

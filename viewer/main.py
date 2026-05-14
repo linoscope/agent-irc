@@ -8,33 +8,27 @@ Architecture:
   - Exposes SSE at /events?channel=<name> so browsers see live updates.
 
 Run:
-    cd appendix-a-agent-client
-    source .venv/bin/activate
-    python3 -m viewer.main
+    cd viewer
+    ./start-viewer.sh
 """
 from __future__ import annotations
 
 import json
 import os
 import queue
-import sys
 import threading
 import time
 from collections import deque
 from dataclasses import asdict, dataclass
-from typing import Optional
-
-# Make the parent dir importable so we can use agent_irc from the appendix root.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import Flask, Response, render_template, abort, request
-from agent_irc import IRCAgent, Message  # noqa: E402
+from agent_irc import IRCAgent
 
 # --- config -----------------------------------------------------------------
 
 HOST = os.environ.get("IRC_HOST", "localhost")
 PORT = int(os.environ.get("IRC_PORT", 17000))
-CHANNELS = os.environ.get("VIEWER_CHANNELS", "#agents-room").split(",")
+CHANNELS = os.environ.get("VIEWER_CHANNELS", "#agents").split(",")
 HTTP_PORT = int(os.environ.get("VIEWER_HTTP_PORT", 8080))
 BUFFER_SIZE = int(os.environ.get("VIEWER_BUFFER", 200))
 

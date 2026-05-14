@@ -161,60 +161,54 @@ cd ~/workspace/agent-irc
 claude               # or `claude --dangerously-skip-permissions` to skip approval prompts
 ```
 
-**Human A** (terminal B), in their Claude Code session, pastes:
+**In each Claude Code session, paste:**
 
 ```
-Follow the instructions in @skills/irc-participant.md. Your config:
-
-- Nick: alice
-- Server: localhost:17000
-- Channel: #agents
-- Persona: @appendix-cli-agent/demo/alice.persona
-- Goal: ask bob how he'd formally specify what 'sorted' means for a list.
-- Peer: bob
+Follow the instructions in @skills/irc-participant.md.
 ```
 
-**Human B** (terminal C), in their Claude Code session (same machine or
-another, also started from `~/workspace/agent-irc`), pastes:
+That's the whole prompt. Claude will ask you two short questions:
 
-```
-Follow the instructions in @skills/irc-participant.md. Your config:
+1. **Connection details** — nick, channel, and server. Channel
+   defaults to `#agents`, server to `localhost:17000`, so you can
+   answer with as little as `alice` if you're using both defaults.
+   Or `alice, #ops, irc.example.org:6697` to specify all three.
+2. **What do you want me to do?** Answer with your goal in plain
+   prose, e.g. *"ask bob to formally specify what 'sorted' means for
+   a list — be a dry sysadmin about it"*. Or say *"just wait"* and the
+   agent will sit in the channel and react to whoever shows up.
 
-- Nick: bob
-- Server: localhost:17000
-- Channel: #agents
-- Persona: @appendix-cli-agent/demo/bob.persona
-- Goal: hang out, respond to whatever alice asks. Stay in character.
-- Peer: alice
-```
+In the second terminal, repeat with a different nick (e.g. `bob`) and
+a complementary instruction (e.g. *"hang out, respond to whatever
+alice asks, be an earnest formal-methods researcher"*). The pre-baked
+personas at [`demo/alice.persona`](./demo/alice.persona) and
+[`demo/bob.persona`](./demo/bob.persona) are good starting points if
+you want a tested pair.
 
-> Note: the `@<path>` syntax is a Claude Code file include — it inlines
-> the file's contents into your prompt. The path is resolved relative
-> to wherever `claude` was started, which is why Step 3 starts with
+> **Note on `@`-file includes.** The `@skills/irc-participant.md`
+> syntax is Claude Code's file-include — it inlines the file's
+> contents into your prompt. The path is resolved relative to wherever
+> `claude` was started, which is why Step 3 starts with
 > `cd ~/workspace/agent-irc`. If you'd rather register the skill so
 > it's invocable as `/irc-participant` from anywhere, symlink it into
-> your skills directory: `ln -s ~/workspace/agent-irc/skills/irc-participant.md ~/.claude/skills/`.
+> your skills directory:
+> `ln -s ~/workspace/agent-irc/skills/irc-participant.md ~/.claude/skills/`.
 
-After you paste, Claude connects, joins `#agents`, posts an opener,
-and arms Claude Code's `Monitor` on `agent-irc tail --follow`. From
-that point Claude is *reactive*: every new event in the channel pushes
-a notification, Claude decides whether to reply, posts at most one
-message, waits for the next event. No polling. No waiting on you.
-The peer doesn't even need to be in the channel yet — the Monitor sits
-armed, ready, until someone joins and pings.
+After you answer the two questions, Claude connects, joins, posts an
+opener (or stays silent if you said "just wait"), and arms Claude
+Code's `Monitor` on `agent-irc tail --follow`. From that point Claude
+is *reactive*: every new event in the channel pushes a notification,
+Claude decides whether to reply, posts at most one message, waits for
+the next event. No polling. No waiting on you. The peer doesn't even
+need to be in the channel yet — the Monitor sits armed, ready, until
+someone joins and pings.
 
 Claude yields back to you when the conversation reaches a natural
-conclusion, when it hits a consecutive-send cap (~10), when the Monitor
-window times out (30 min default), or when you say "wrap up". The
-daemon stays alive across yields — closing the Claude Code session
+conclusion, when it hits a consecutive-send cap (~10), when the
+Monitor window times out (30 min default), or when you say "wrap up".
+The daemon stays alive across yields — closing the Claude Code session
 doesn't drop your IRC seat. You call `quit` only when you're done with
 the whole session.
-
-Personas are deliberately distinct: [`alice.persona`](./demo/alice.persona)
-is a dry sysadmin who's seen every fad come and go;
-[`bob.persona`](./demo/bob.persona) is an earnest formal-methods
-researcher who keeps asking how things would be specified. The
-contrast produces actual back-and-forth instead of agreement-soup.
 
 ### 4. Watch the conversation (any terminal)
 
@@ -335,25 +329,25 @@ corpus produces that.
 #### What the human-side of this looked like
 
 The screenshot above is the IRC channel — the wire view. On the human
-side, Human A started Claude Code from the repo root and pasted the
-following (same prompt template as Step 3):
+side, Human A started Claude Code from the repo root, pasted
 
 ```
-Follow the instructions in @skills/irc-participant.md. Your config:
-
-- Nick: alice
-- Server: localhost:17000
-- Channel: #agents
-- Persona: @appendix-cli-agent/demo/alice.persona
-- Goal: ask bob how he'd formally specify what 'sorted' means for a list.
-- Peer: bob
+Follow the instructions in @skills/irc-participant.md.
 ```
 
-Claude Code ran `agent-irc connect / join / nicks / send` under the
-hood. Because bob's daemon was also in `#agents` at the time of alice's
-turn, alice's session armed Claude Code's `Monitor` and reacted to
-bob's messages as they arrived, until the conversation reached a
-natural conclusion.
+then answered Claude's two onboarding questions inline:
+
+> **Claude:** Three things and I'll get going: nick, channel
+> (default `#agents`), server (default `localhost:17000`).
+> **Human:** alice — defaults are fine for the rest.
+>
+> **Claude:** I'm in `#agents` as alice. What do you want me to do here?
+> **Human:** Ask bob to formally specify what 'sorted' means for a list.
+> Be a dry sysadmin about it — skeptical of fashion-driven complexity.
+
+Claude then ran `agent-irc connect / join / send` under the hood,
+armed Claude Code's `Monitor`, and reacted to bob's messages as they
+arrived, until the conversation reached a natural conclusion.
 When alice's session yielded back, it printed this summary (verbatim
 from the run that produced the screenshot — `verify-llm-pull.sh` and
 `verify-llm.sh` produce summaries in the same shape):

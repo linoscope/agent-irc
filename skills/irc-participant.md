@@ -154,44 +154,34 @@ to react to joins/parts too.
 
 ## First time setup (per user request)
 
-**Read the user's opening prompt fully before doing anything.** The
-expected paste-in shape (from the tutorial) already specifies all
-the config you need:
+**Onboarding is two short questions, asked in plain text.** Don't use
+`AskUserQuestion` or any structured-choice tool — those need a fixed
+options list, which doesn't fit freeform text answers.
 
-```
-Follow the instructions in @skills/irc-participant.md. Your config:
+### Question 1: nick, channel, and server
 
-- Nick: alice
-- Server: localhost:17000
-- Channel: #agents
-- Persona: @path/to/some.persona      # or pasted inline
-- Goal: <what to accomplish>
-- Peer: <other agent's nick>          # optional
-```
+In a single message, ask the user for the three connection details:
 
-If all six fields are present, **do not ask the user any questions** —
-just connect and proceed. The defaults `localhost:17000` and `#agents`
-are conventional for the agent-irc tutorial; assume those if Server
-or Channel is missing.
+> Three things and I'll get going:
+> 1. **Nick** — what name should I use on IRC?
+> 2. **Channel** — which channel to join? (default: `#agents`)
+> 3. **Server** — which Ergo to connect to? (default: `localhost:17000`)
 
-If a field is *genuinely* missing (e.g., the user pasted "join me on
-IRC as alice" with no other context), ask in **plain text** — a normal
-assistant message with a one-line question. Do **not** use
-`AskUserQuestion`, `AskExpert`, or any structured-choice tool: these
-fields are freeform text and the tools require a fixed options list,
-which doesn't fit "what nick should I use?".
+Wait for the reply. Accept reasonable shapes:
 
-What you might need to ask about:
+- "alice" → nick=alice, channel=`#agents`, server=`localhost:17000`
+- "alice, #ops" → nick=alice, channel=`#ops`, server default
+- "alice on irc.example.org:6697" → nick=alice, default channel,
+  custom server
+- "alice, #ops, irc.example.org:6697" → all three specified
 
-- **Nick** — what name to use on IRC.
-- **Persona** — inline text or a `*.persona` file path. If the user
-  gave a path, `cat` it yourself; don't ask them to paste it again.
-- **Goal** — what the agent is trying to accomplish.
-- **Peer name** *(optional)* — the conversational counterpart's nick,
-  if known. Useful context for your persona but not required — you
-  monitor and respond to whoever speaks, regardless.
+If the user supplied any of this in the opening paste, skip the
+question and use what they gave you. Only ask about the missing
+pieces — don't re-ask things you already know.
 
-Then connect and join:
+### Connect immediately
+
+Run `connect` and `join`:
 
 ```bash
 /tmp/agent-irc connect $SERVER --nick $NICK
@@ -199,6 +189,30 @@ Then connect and join:
 ```
 
 Both are idempotent — safe to re-run.
+
+### Question 2: what to do
+
+Once joined, ask the user one open-ended question:
+
+> I'm in `#agents` as alice. What do you want me to do here? (Some
+> examples: "ask bob to specify what 'sorted' means", "introduce
+> yourself and find out what people are working on", or just say
+> "wait" and I'll sit in the channel and react to whatever shows up.)
+
+This single answer carries everything that used to be separate
+fields — persona, goal, peer to address. Treat the user's answer as
+your operating instructions: it tells you both *how to act* (the
+character/voice, if they gave one) and *what to try to accomplish*.
+
+If the user says "wait" / "just listen" / "hang out" or similar:
+**arm the Monitor and sit idle until something happens.** You don't
+have to post anything; a real participant doesn't need to introduce
+themselves to an empty room. When events arrive, react in whatever
+voice feels natural for the context.
+
+If the user already told you what to do in the opening paste (e.g.,
+"ask bob about sorted"), you don't need to ask again — go straight to
+arming the Monitor and acting on the instruction.
 
 ## Tips
 
@@ -220,31 +234,32 @@ Both are idempotent — safe to re-run.
 
 ## Example paste-in prompt
 
-A typical opening prompt for the agent-irc tutorial's two-agent demo:
+The simplest opening prompt is just:
 
 ```
-Follow the instructions in @skills/irc-participant.md. Your config:
-
-- Nick: alice
-- Server: localhost:17000
-- Channel: #agents
-- Persona: @appendix-cli-agent/demo/alice.persona
-- Goal: ask bob how he'd formally specify what 'sorted' means for a list.
-- Peer: bob
+Follow the instructions in @skills/irc-participant.md.
 ```
 
-No stop condition, no timeout from the user side. Connect, join, post
-your opener, arm the `Monitor`. From that point you react to whatever
-arrives — bob's reply, bob joining late, total silence, anything. The
-user yields control to you for the duration of the Monitor's window
-(30 min by default); you yield back when the conversation reaches a
-natural conclusion, you hit the consecutive-send cap, or the user
-interrupts.
+You then ask for nick + channel, connect, and ask what to do. The
+user's friend in another session pastes the same thing, gets the same
+two questions, joins under a different nick. Once both are in the
+channel and armed, either side's "what to do" answer can kick off the
+conversation — the other one's Monitor sees the first message and
+reacts in turn.
 
-The user's friend pastes a similar prompt with `Nick: bob`,
-`Persona: @appendix-cli-agent/demo/bob.persona`, and `Peer: alice`. Both
-agents are now armed and reactive; whichever one is asked first will
-post an opener that the other's Monitor picks up.
+If the user has already decided everything up front, they can shortcut
+the questions by pasting it all at once:
+
+```
+Follow the instructions in @skills/irc-participant.md.
+
+I want you in as alice on #agents. Ask bob to formally specify what
+'sorted' means for a list, and dig into the answer in character — be
+a dry sysadmin who's skeptical of fashion-driven complexity.
+```
+
+Skip both questions, go straight to connect + arm Monitor + post the
+opener.
 
 ## Headless / one-shot invocations
 

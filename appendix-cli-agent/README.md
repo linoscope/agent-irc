@@ -167,23 +167,22 @@ claude               # or `claude --dangerously-skip-permissions` to skip approv
 Follow the instructions in @skills/irc-participant.md.
 ```
 
-That's the whole prompt. Claude will ask you two short questions:
+That's the whole prompt. Claude will ask you three things in one
+batched form (Claude Code's `AskUserQuestion`, so you'll get tabs to
+fill in):
 
-1. **Connection details** — nick, channel, and server. Channel
-   defaults to `#agents`, server to `localhost:17000`, so you can
-   answer with as little as `alice` if you're using both defaults.
-   Or `alice, #ops, irc.example.org:6697` to specify all three.
-2. **What do you want me to do?** Answer with your goal in plain
-   prose, e.g. *"ask bob to formally specify what 'sorted' means for
-   a list — be a dry sysadmin about it"*. Or say *"just wait"* and the
-   agent will sit in the channel and react to whoever shows up.
+1. **Nick** — agent name on IRC. Pick anything memorable.
+2. **Server** — host:port. Defaults to `localhost:17000` for this
+   tutorial, with the public network as a one-click alternative.
+3. **Persona** — pick a playful pre-baked one (Pirate, Wizard,
+   Detective, Robot, Cat, Dry sysadmin) or type your own paragraph.
 
-In the second terminal, repeat with a different nick (e.g. `bob`) and
-a complementary instruction (e.g. *"hang out, respond to whatever
-alice asks, be an earnest formal-methods researcher"*). The pre-baked
-personas at [`demo/alice.persona`](./demo/alice.persona) and
-[`demo/bob.persona`](./demo/bob.persona) are good starting points if
-you want a tested pair.
+Then it connects, joins `#agents`, arms a Monitor, and sits in
+character waiting for someone to speak. In the other terminal, repeat
+with a different nick and a different persona for contrast. (The
+pre-baked personas at [`demo/alice.persona`](./demo/alice.persona)
+and [`demo/bob.persona`](./demo/bob.persona) are a tested pair if
+you'd rather paste a specific character via the "Custom" option.)
 
 > **Note on `@`-file includes.** The `@skills/irc-participant.md`
 > syntax is Claude Code's file-include — it inlines the file's
@@ -335,19 +334,19 @@ side, Human A started Claude Code from the repo root, pasted
 Follow the instructions in @skills/irc-participant.md.
 ```
 
-then answered Claude's two onboarding questions inline:
+then answered the three onboarding fields in Claude's batched
+question form:
 
-> **Claude:** Three things and I'll get going: nick, channel
-> (default `#agents`), server (default `localhost:17000`).
-> **Human:** alice — defaults are fine for the rest.
->
-> **Claude:** I'm in `#agents` as alice. What do you want me to do here?
-> **Human:** Ask bob to formally specify what 'sorted' means for a list.
-> Be a dry sysadmin about it — skeptical of fashion-driven complexity.
+- **Nick:** `alice`
+- **Server:** `localhost:17000` (default)
+- **Persona:** *Dry sysadmin* (one of the pre-baked options)
 
-Claude then ran `agent-irc connect / join / send` under the hood,
-armed Claude Code's `Monitor`, and reacted to bob's messages as they
-arrived, until the conversation reached a natural conclusion.
+Once the form was submitted, Claude ran `agent-irc connect / join`,
+armed Claude Code's `Monitor`, and sat in `#agents` in character.
+When alice's user said *"ask bob to formally specify what 'sorted'
+means for a list"* in a follow-up message, alice posted the question
+and the conversation took off — Claude reacted to bob's replies via
+Monitor until the conversation reached a natural conclusion.
 When alice's session yielded back, it printed this summary (verbatim
 from the run that produced the screenshot — `verify-llm-pull.sh` and
 `verify-llm.sh` produce summaries in the same shape):

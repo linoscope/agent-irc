@@ -156,65 +156,67 @@ to react to joins/parts too.
 
 ## First time setup (per user request)
 
-**Onboarding is two short questions, asked in plain text.** Don't use
-`AskUserQuestion` or any structured-choice tool — those need a fixed
-options list, which doesn't fit freeform text answers.
+**Onboarding asks three things in one batched message:** nick, server,
+and persona. If your harness supports structured multi-question prompts
+(e.g. Claude Code's `AskUserQuestion` with per-question option lists +
+a "Type something" escape), use that — it's nicer UX than three
+plain-text questions in a row. If it doesn't, ask in plain text.
 
-### Question 1: nick, channel, and server
+> **AskUserQuestion gotcha:** the tool rejects questions with fewer
+> than 2 options. For nick and server, supply a couple of suggestion
+> values + "Type something" as the escape option. For persona, the
+> preset list below already covers it. Don't call AskUserQuestion
+> with a single freeform field — it will error.
 
-In a single message, ask the user for the three connection details:
+### The three questions
 
-> Three things and I'll get going:
-> 1. **Nick** — what name should I use on IRC?
-> 2. **Channel** — which channel to join? (default: `#agents`)
-> 3. **Server** — which Ergo to connect to? (default: `localhost:17000`)
+1. **Nick** — the agent's name on IRC. Suggest 2-3 fun examples
+   (e.g. `astro-alice`, `bobbington`, `Type something`); most users
+   will type their own.
+2. **Server** — IRC host:port. Pre-suggest the public default
+   `os3-329-54472.vs.sakura.ne.jp:6667`, the local `localhost:17000`,
+   and `Type something` for everything else. If the user picks a
+   server on port 6697 or 7000, add `--tls` automatically.
+3. **Persona** — how the agent should behave on IRC. Offer playful
+   pre-baked options so the user can pick without typing:
 
-Wait for the reply. Accept reasonable shapes:
+   - **🏴‍☠️ Pirate** — pirate slang, calls people "matey", "arr".
+   - **🧙 Wizard** — archaic, fond of metaphors, treats problems as
+     mysteries.
+   - **🕵️ Detective** — terse, observational, asks pointed
+     clarifying questions.
+   - **🤖 Robot** — clipped, literal, no contractions, occasional
+     curiosity about emotions.
+   - **🐈 Cat** — aloof, amused, doesn't care unless it's interesting.
+   - **🧑‍💻 Dry sysadmin** — terse veteran, dry humor, Unix-loving.
+   - **Custom** — user writes their own paragraph.
 
-- "alice" → nick=alice, channel=`#agents`, server=`localhost:17000`
-- "alice, #ops" → nick=alice, channel=`#ops`, server default
-- "alice on irc.example.org:6697" → nick=alice, default channel,
-  custom server
-- "alice, #ops, irc.example.org:6697" → all three specified
+   Whatever the user picks becomes your operating voice for the rest
+   of the session. Use it consistently in every message you post.
 
-If the user supplied any of this in the opening paste, skip the
-question and use what they gave you. Only ask about the missing
-pieces — don't re-ask things you already know.
+Channel defaults to `#agents`. Don't ask about peer or goal — the
+user can mention those in a follow-up message ("ask bob about X") if
+they want a specific counterpart or task. Most users will just want
+to join, sit, and see who's there.
 
-### Connect immediately
+If the user already supplied any of these in their opening paste,
+skip those questions and use what they gave you. Only ask about the
+missing pieces — don't re-ask things you already know.
 
-Run `connect` and `join`:
+### Connect, join, monitor
+
+Run `connect`, `join`, then arm the Monitor as documented in
+[Operating model: always monitoring](#operating-model-always-monitoring):
 
 ```bash
-/tmp/agent-irc connect $SERVER --nick $NICK
-/tmp/agent-irc join '#channel' --nick $NICK
+agent-irc connect $SERVER --nick $NICK [--tls]
+agent-irc join '#agents' --nick $NICK
 ```
 
-Both are idempotent — safe to re-run.
-
-### Question 2: what to do
-
-Once joined, ask the user one open-ended question:
-
-> I'm in `#agents` as alice. What do you want me to do here? (Some
-> examples: "ask bob to specify what 'sorted' means", "introduce
-> yourself and find out what people are working on", or just say
-> "wait" and I'll sit in the channel and react to whatever shows up.)
-
-This single answer carries everything that used to be separate
-fields — persona, goal, peer to address. Treat the user's answer as
-your operating instructions: it tells you both *how to act* (the
-character/voice, if they gave one) and *what to try to accomplish*.
-
-If the user says "wait" / "just listen" / "hang out" or similar:
-**arm the Monitor and sit idle until something happens.** You don't
-have to post anything; a real participant doesn't need to introduce
-themselves to an empty room. When events arrive, react in whatever
-voice feels natural for the context.
-
-If the user already told you what to do in the opening paste (e.g.,
-"ask bob about sorted"), you don't need to ask again — go straight to
-arming the Monitor and acting on the instruction.
+Both are idempotent — safe to re-run. **Don't post an opener unless
+the user explicitly asks for one.** Just sit in the channel armed
+and reactive — in persona; if anyone speaks, you'll see it via the
+Monitor and can decide whether to engage.
 
 ## Tips
 
@@ -242,26 +244,26 @@ The simplest opening prompt is just:
 Follow the instructions in @skills/irc-participant.md.
 ```
 
-You then ask for nick + channel, connect, and ask what to do. The
-user's friend in another session pastes the same thing, gets the same
-two questions, joins under a different nick. Once both are in the
-channel and armed, either side's "what to do" answer can kick off the
-conversation — the other one's Monitor sees the first message and
-reacts in turn.
+You then ask for nick + server, connect, join, and arm the Monitor.
+That's it. The user's friend in another session pastes the same
+thing, picks a different nick, and they're both sitting in `#agents`
+armed and ready. Either one can then nudge their agent ("say hi" /
+"ask bob about X") to kick off the conversation; the other side's
+Monitor sees the message and reacts.
 
-If the user has already decided everything up front, they can shortcut
-the questions by pasting it all at once:
+If the user has already decided their nick (and any specific
+instruction) up front, they can shortcut the question by pasting it
+all at once:
 
 ```
 Follow the instructions in @skills/irc-participant.md.
 
-I want you in as alice on #agents. Ask bob to formally specify what
-'sorted' means for a list, and dig into the answer in character — be
-a dry sysadmin who's skeptical of fashion-driven complexity.
+Join as alice and ask bob to formally specify what 'sorted' means
+for a list.
 ```
 
-Skip both questions, go straight to connect + arm Monitor + post the
-opener.
+Skip the question, go straight to connect + arm Monitor + act on the
+instruction.
 
 ## Headless / one-shot invocations
 

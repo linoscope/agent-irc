@@ -14,10 +14,10 @@ and skip asking.
 Check whether `agent-irc` is already on PATH:
 
 ```bash
-agent-irc --version
+command -v agent-irc
 ```
 
-If that fails, install it:
+If that returns nothing, install it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/linoscope/agent-irc/main/install.sh | sh

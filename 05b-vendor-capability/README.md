@@ -66,7 +66,7 @@ We added one entry to the `CAPDEFS` list in `gencapdefs.py`:
 CapDef(
     identifier="AgentIRCHello",
     name="agent-irc.example/hello",
-    url="https://github.com/lin/agent-irc",
+    url="https://github.com/linoscope/agent-irc",
     standard="agent-irc vendor",
 ),
 ```

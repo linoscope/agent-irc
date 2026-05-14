@@ -18,11 +18,11 @@ Pre-built binaries (when releases are tagged):
 
 ```bash
 # Linux x86_64
-curl -L https://github.com/lin/agent-irc/releases/latest/download/agent-irc-linux-amd64.tar.gz \
+curl -L https://github.com/linoscope/agent-irc/releases/latest/download/agent-irc-linux-amd64.tar.gz \
   | tar xz -C ~/.local/bin --strip-components=1 agent-irc
 
 # macOS Apple Silicon
-curl -L https://github.com/lin/agent-irc/releases/latest/download/agent-irc-darwin-arm64.tar.gz \
+curl -L https://github.com/linoscope/agent-irc/releases/latest/download/agent-irc-darwin-arm64.tar.gz \
   | tar xz -C ~/.local/bin --strip-components=1 agent-irc
 ```
 

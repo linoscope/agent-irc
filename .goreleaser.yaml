@@ -57,7 +57,7 @@ changelog:
 # scope this release pipeline to cli-v* tags only via the GH Action workflow.
 release:
   github:
-    owner: lin
+    owner: linoscope
     name: agent-irc
   prerelease: auto
   name_template: "agent-irc CLI {{.Tag}}"

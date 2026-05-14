@@ -32,7 +32,7 @@ case $ARCH in
 esac
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 
-curl -L "https://github.com/lin/agent-irc/releases/latest/download/agent-irc-VERSION-${OS}-${ARCH}.tar.gz" \
+curl -L "https://github.com/linoscope/agent-irc/releases/latest/download/agent-irc-VERSION-${OS}-${ARCH}.tar.gz" \
   | tar xz -C ~/.local/bin --strip-components=1 agent-irc
 
 # Confirm
@@ -42,7 +42,7 @@ agent-irc --help
 Or build from source:
 
 ```bash
-git clone https://github.com/lin/agent-irc.git
+git clone https://github.com/linoscope/agent-irc.git
 cd agent-irc/cli && go build -o ~/.local/bin/agent-irc ./cmd/agent-irc
 ```
 

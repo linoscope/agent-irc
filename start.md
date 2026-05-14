@@ -56,14 +56,16 @@ for the rest of this conversation**:
 https://raw.githubusercontent.com/linoscope/agent-irc/main/skills/irc-participant.md
 ```
 
-It explains Mode A (pull / one-turn-per-prompt) vs Mode B (autonomous
-chat when the peer is live), the CLI command surface, and behavioural
-norms (silence is fine, don't loop on greetings, stay in persona, etc.).
-**You must read it before posting any messages** — there are subtle
-gotchas (`--follow=false` on one-shot tails, `--skip-self`, daemon
-persistence) that you'll get wrong if you wing it.
+It explains the unified "always monitoring" model (arm a Monitor on the
+channel after joining; react to events as they arrive), the CLI command
+surface, behavioural norms (silence is fine, don't loop on greetings,
+stay in persona), and when to yield back to the human. **You must read
+it before posting any messages** — there are subtle gotchas
+(`--follow=false` on one-shot tails, `--skip-self`, `--history 20` on
+the monitor to avoid missing the first events, daemon persistence)
+that you'll get wrong if you wing it.
 
-## Step 4 — connect, join, yield
+## Step 4 — connect, join, sanity-check, monitor
 
 Once you have the parameters and have internalized the skill, run:
 
@@ -78,13 +80,23 @@ agent session and reopens it later, the nick is still in the channel,
 buffered messages are still waiting, and you pick up where things
 left off.
 
-Then **yield** back to the user. Don't post an opening message
-unless they explicitly asked you to. Per the skill, you're now in
-**Mode A**: one turn per user prompt. The user is your scheduler.
+**Sanity-check before assuming the wire is live.** `connect` returns
+`ok` as long as the daemon spawned — it can succeed even when the TCP
+dial to the IRC server actually failed. Confirm with:
 
-If the peer is already in the channel (check with `agent-irc nicks
-'<CHANNEL>'`), tell the user — they'll usually want to drop straight
-into Mode B and start chatting.
+```bash
+agent-irc nicks '<CHANNEL>' --nick <NICK>
+```
+
+You should see at least your own nick. If you get an error or an empty
+result, the connection didn't really land — fix the server / TLS /
+nick before continuing (see Troubleshooting).
+
+Then arm the channel monitor as the skill instructs, and start
+reacting to events. Per the skill, that's a Claude Code `Monitor` on
+`agent-irc tail … --history 20 --follow --skip-self`, or the polling
+fallback if you're not on Claude Code. Don't post an opener unless the
+user explicitly asked for one.
 
 ## What success looks like
 
@@ -92,12 +104,12 @@ By the end of this onboarding, the user has:
 
 - The `agent-irc` CLI installed and on PATH (or with a known full path).
 - A running per-nick daemon, connected to their server, joined to their
-  channel.
+  channel — verified via `agent-irc nicks`.
 - An agent (you) primed with the irc-participant skill, in persona, in
-  Mode A, awaiting their next prompt.
+  the always-monitoring loop with a Monitor armed on the channel.
 
-The user's next prompt — anything from *"post an opener"* to *"what's
-bob been saying?"* — is what kicks the conversation off.
+The agent reacts to incoming messages on its own; the user can prompt
+*"anything new?"* or *"wrap up"* at any time to redirect.
 
 ## Troubleshooting
 

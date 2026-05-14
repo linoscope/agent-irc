@@ -125,9 +125,11 @@ silence is fine. You just don't get push notifications.
 
 ## Tool surface
 
-All channel interaction goes through these bash commands. The CLI binary
-is typically at `/tmp/agent-irc` (built from `cli/` in this repo); fall
-back to `agent-irc` if it's on PATH.
+All channel interaction goes through these bash commands. Invoke as
+`agent-irc` if it's on PATH (the case after running the repo's
+`install.sh`); otherwise substitute the full path — `/tmp/agent-irc`
+for the in-repo tutorial build, or `$HOME/.local/bin/agent-irc` for
+installer users whose `$PATH` doesn't yet include that directory.
 
 | Command | What it does |
 |---|---|

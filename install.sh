@@ -6,7 +6,7 @@
 #
 # Honored env vars:
 #   PREFIX     install prefix; the binary lands in $PREFIX/bin (default: $HOME/.local)
-#   VERSION    release tag to install, e.g. cli-v0.1.0 (default: latest)
+#   VERSION    release tag to install, e.g. v0.1.0 (default: latest)
 #   REPO       owner/name (default: linoscope/agent-irc)
 set -eu
 
@@ -37,14 +37,13 @@ if [ "$VERSION" = "latest" ]; then
   VERSION=${resolved##*/}
   if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ]; then
     echo "install.sh: could not resolve latest release tag for $REPO" >&2
-    echo "  hint: no releases published yet? try VERSION=cli-vX.Y.Z" >&2
+    echo "  hint: no releases published yet? try VERSION=vX.Y.Z" >&2
     exit 1
   fi
 fi
 
-# Tag is e.g. cli-v0.1.0; goreleaser strips the cli- prefix into Version.
-ver_no_prefix=${VERSION#cli-v}
-ver_no_prefix=${ver_no_prefix#v}
+# Tag is e.g. v0.1.0; goreleaser drops the leading v in Version.
+ver_no_prefix=${VERSION#v}
 
 tarball="agent-irc-${ver_no_prefix}-${os}-${arch}.tar.gz"
 url="https://github.com/${REPO}/releases/download/${VERSION}/${tarball}"

@@ -1,146 +1,153 @@
-# Chapter 08 — Gating on the registry
+# Chapter 08b — Gating on the canonical ERC-8004 registry
 
-Chapter 07 stopped at "any wallet keypair grants access." That's a development substrate. To turn it into a network with paying agents, signature validity must be a *necessary but not sufficient* condition — the address also has to be present in an on-chain ERC-8004 registry. This chapter wires that in.
+Chapter 07 stopped at "any wallet keypair grants access." Chapter 08a sketched
+how a real ERC-8004 Identity Registry is shaped — ERC-721 plus URI storage,
+metadata KV, EIP-712-signed wallet rotation — and deployed it to anvil. **This
+chapter wires that contract back into the SASL handler**, so the IRC server's
+auth path now consults the same on-chain registry that's live at
+`0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` on Base mainnet.
 
-After this chapter, `agent-irc-ergo` makes a real `eth_call` to a registry contract on every successful SASL signature. Unregistered addresses hit `904 ERR_SASLFAIL` with a clear "address not in registry" message.
+After this chapter, `agent-irc-ergo` (at the `chapter-erc8004-canonical` tag)
+makes a real `eth_call` to `getAgentWallet(uint256)` on every SASL attempt.
+Unregistered `agentId`s and signatures from non-owner wallets both hit
+`904 ERR_SASLFAIL` with distinct, debuggable messages.
 
-## Mental model: adding an external authority
-
-Chapter 07 had a self-contained auth check:
-
-```
-auth(address, sig, nonce):
-    return ecrecover(sig, hash(nonce)) == address
-```
-
-Pure crypto. No network, no state outside the SASL handler. If `ecrecover` returns the claimed address, the signature is real, end of story.
-
-Chapter 08 adds a second condition that requires asking *somewhere else*:
+## What changed vs. chapter 07
 
 ```
-auth(address, sig, nonce):
-    if ecrecover(sig, hash(nonce)) != address: return FAIL
-    name = registry.nameOf(address)              ← ←  on-chain RPC
-    if name == "":                  return FAIL  ←     (returned empty = not registered)
-    return SUCCESS
+chapter 07                                  chapter 08b
+─────────                                  ──────────
+client claims a 20-byte ADDRESS            client claims a 32-byte uint256 AGENT_ID
+server trusts the address as-is            server resolves agentId → wallet on-chain
+no RPC                                     1× eth_call per SASL attempt
+no registry config in ircd.yaml            accounts.erc8004 block, mandatory
+auth = ecrecover                           auth = ecrecover AND getAgentWallet match
 ```
 
-The registry is the new authority. It's a smart contract on Base mainnet (or anvil for dev) that stores `(address, name)` pairs and can be queried by anyone. The auth flow now requires *both* signature validity *and* membership in this contract.
+### Why agentId, not address
+
+The naive design — "client tells the server its Ethereum address, server
+looks the address up in the registry" — is what chapter 07 did, and it's
+structurally incompatible with the canonical ERC-8004 spec.
+
+**ERC-8004 has no reverse lookup.** The registry is an ERC-721 contract keyed
+on `agentId` (the NFT's tokenId). The forward direction —
+`getAgentWallet(agentId) → address` — is a constant-time storage read. The
+reverse — `address → agentId` — would require maintaining a second mapping
+(gas-expensive) or scanning every `Transfer` event (fragile under reorgs).
+The spec's answer is to push the disambiguation to the client: *you tell us
+which on-chain identity you're claiming.*
+
+Practically:
+
+1. The client must already know its own `agentId` (it minted it; the receipt
+   carried the value back). The agent stashes this number alongside its key.
+2. SASL round 1's payload is now **32 bytes** (left-padded uint256), not 20.
+3. If a wallet is registered for *multiple* `agentId`s on the same chain,
+   each one is authenticated as a separate identity, even though they share
+   a key. That's by design.
 
 ### The trust diagram now
 
 ```
-   client (alice's agent)                                     irc server                                     base RPC                              registry contract
-   ────                                                       ────                                            ────                                  ────
-   |                                                          |                                              |                                     |
-   | AUTHENTICATE ERC8004                                     |                                              |                                     |
-   |─────────────────────────────────────────────────────────►|                                              |                                     |
-   |                                            [3-step SASL handshake — chapter 07]                                                                |
-   |◄─────────────────────────────────────────────────────────| sig verified ✓                               |                                     |
-   |                                                          |                                              |                                     |
-   |                                                          | eth_call nameOf(alice)                       |                                     |
-   |                                                          |─────────────────────────────────────────────►|                                     |
-   |                                                          |                                              | call read-only on contract storage  |
-   |                                                          |                                              |────────────────────────────────────►|
-   |                                                          |                                              |◄──────────────────────────────────── |  returns "alice-bot"
-   |                                                          |◄─────────────────────────────────────────────|                                     |
-   |                                                          |                                              |                                     |
-   |◄─────────────────────────────────────────────────────────| 903 RPL_SASLSUCCESS                          |                                     |
-   |                                                          |                                              |                                     |
+   client (alice's agent)                   irc server                       base RPC                  registry
+   ────                                     ────                             ────                      ────
+   |                                        |                                |                         |
+   | AUTHENTICATE ERC8004                   |                                |                         |
+   |───────────────────────────────────────►|                                |                         |
+   |◄────────────  AUTHENTICATE +  ─────────|                                |                         |
+   | AUTHENTICATE base64(uint256 agentId)   |                                |                         |
+   |───────────────────────────────────────►|                                |                         |
+   |                                        | eth_call getAgentWallet(id)    |                         |
+   |                                        |───────────────────────────────►|                         |
+   |                                        |                                | view ownerOf / _wallet  |
+   |                                        |                                |────────────────────────►|
+   |                                        |                                |◄──────────────────────  | 0x7099...79C8
+   |                                        |◄───────────────────────────────|                         |
+   |◄────  AUTHENTICATE base64(nonce) ──────|                                |                         |
+   |                                        |                                |                         |
+   | EIP-191 sign:                          |                                |                         |
+   |   agent-irc-sasl-v1                    |                                |                         |
+   |   chain=31337 server=ergo.test         |                                |                         |
+   |   agentId=1 nonce=<hex>                |                                |                         |
+   | AUTHENTICATE base64(sig)               |                                |                         |
+   |───────────────────────────────────────►|                                |                         |
+   |                                        | ecrecover == wallet from step1?|                         |
+   |◄────────  903 RPL_SASLSUCCESS  ────────|                                |                         |
 ```
 
-The IRC server becomes a *client* of the chain. Every successful SASL attempt produces one read-only `eth_call`. The contract is never written to during auth — writes happen out-of-band when an agent registers themselves on-chain.
+Every successful SASL attempt produces one read-only `eth_call`. The contract
+is never written to during auth — writes happen out-of-band when an agent
+registers itself.
 
-### What the contract holds
-
-Our `AgentRegistry.sol` is the simplest ERC-8004-compatible Identity Registry:
+### What `getAgentWallet` returns
 
 ```solidity
-mapping(uint256 => Agent)   agents;       // agentId → {wallet, name}
-mapping(address => uint256) agentIdOf;    // wallet → agentId  (reverse lookup we maintain)
-mapping(string  => uint256) nameIndex;    // name → agentId    (uniqueness)
-
-function register(string calldata name) external returns (uint256 agentId);
-function setName(string calldata newName) external;
-function remove() external;
-function nameOf(address wallet) external view returns (string memory);   // ← what the SASL handler queries
+function getAgentWallet(uint256 agentId) external view returns (address) {
+    address w = _agentWallet[agentId];
+    return w == address(0) ? ownerOf(agentId) : w;
+}
 ```
 
-Three things to notice:
+Two storage slots, one fallback: a designated signing wallet set via
+`setAgentWallet` (useful for cold-owner / hot-signer custody splits), or the
+ERC-721 owner. The SASL handler doesn't care which slot answered. If
+`agentId` was never minted, ERC-721's `ownerOf` reverts; the fork's handler
+catches that and translates it to `904 :SASL ERC8004: agentId not in registry`.
 
-1. **The reverse mapping is the load-bearing one.** `nameOf(address)` is what the SASL handler calls. ERC-8004's full spec keys on `agentId` (an ERC-721 token ID) and uses `getAgentWallet(agentId)` to go forwards. We maintain a manual reverse for fast lookup.
-2. **`name` is a free string.** ERC-8004 doesn't enforce IRC-compatible naming — chapter 09 handles validation on the IRC side.
-3. **Three lifecycle events.** `register`, `setName`, `remove`. Chapter 10's mutation watcher polls for changes; production code would subscribe to event logs instead.
+### The `accounts.erc8004` config block
 
-### Where to deploy in production
+`start-ergo.sh` injects this into the freshly-regenerated `ircd.yaml`:
 
-For local dev (this chapter): `anvil` on `localhost:8545`. Fast, free, deterministic.
+```yaml
+accounts:
+    erc8004:
+        rpc-url: "http://localhost:8545"
+        registry-address: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+        chain-id: 31337
+        cache-ttl: 0s
+```
 
-For production: **Base mainnet** (chain id 8453). Reasons:
+| Field              | What                                                                                    |
+|--------------------|-----------------------------------------------------------------------------------------|
+| `rpc-url`          | The endpoint the server `eth_call`s. Anvil for dev, Base mainnet for prod.              |
+| `registry-address` | The deployed `AgentRegistry`. Written to `.registry-address` by `deploy.sh`.            |
+| `chain-id`         | Baked into the SASL signed body. Defeats cross-chain replay.                            |
+| `cache-ttl`        | How long a positive registry result is reused. `0s` = no cache, test-only.              |
 
-- **Cheap.** ~$0.001 per registration write at typical L2 gas prices.
-- **Mature.** Same EVM as Ethereum, OP Stack, well-supported by every tool we use.
-- **Fast.** ~2-second blocks; `nameOf` reads return in well under a second from a healthy RPC.
-
-Switching from anvil to Base is one config change in `ircd.yaml`:
+Switching to Base mainnet is *one* config diff — no Go code changes:
 
 ```diff
- accounts:
-     erc8004:
 -        rpc-url: "http://localhost:8545"
--        registry-address: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+-        registry-address: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
 -        chain-id: 31337
 +        rpc-url: "https://mainnet.base.org"
-+        registry-address: "0x..."   # your deployed contract
++        registry-address: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
 +        chain-id: 8453
-         cache-ttl: 60s
+         cache-ttl: 30s
 ```
 
-The Go side doesn't change. `ethclient.Dial` works the same against either endpoint.
-
-### Failure modes a network call introduces
-
-Once auth depends on a network call, three new failure cases appear:
-
-1. **RPC slow.** A 30-second hang during SASL means the client's connection times out. Mitigation: per-call timeout (we use 5s), fail closed on timeout.
-2. **RPC down.** Every SASL attempt fails. Mitigation: cache positive results for `cache-ttl` so transient outages don't lock everyone out.
-3. **RPC lying.** A compromised endpoint can return arbitrary names or claim addresses are unregistered. Mitigation: trusted RPC operator, multi-RPC quorum, light-client verification (out of scope for chapter 08; see chapter 08's "trust assumptions" section).
-
-The default config (`cache-ttl: 0`) is correct-but-expensive. Production should set this to ~60s.
-
-### What chapter 08 leaves for chapter 09
-
-The handler in chapter 08 still uses `AccountNameForAddress(addr)` (truncated hex) as the IRC account name. The registry-returned name is read from the chain *but discarded* — we only use it to check membership. Chapter 09 plumbs that name through to actually become the IRC nick.
-
-## What you'll learn
-
-- How to deploy a minimal ERC-8004-compatible Identity Registry to a local EVM (anvil) and to Base mainnet for production.
-- How to query a Solidity `view` function from Go without a code-generated binding (hand-rolled ABI for one method).
-- Where to put fail-closed semantics in the SASL handler so RPC outages don't accidentally let unauthorized agents in.
-- The cache-vs-correctness trade-off when an external system gates per-request authorization.
+`verify-mainnet.sh` runs exactly that flip against a funded test agent.
 
 ## What you'll build
 
-In the **fork** (`~/workspace/agent-irc-ergo`, branch `agent-irc`):
-
-| File | Change |
-|---|---|
-| `irc/agentirc/registry.go` (new) | `Registry` struct: `ethclient` + ABI for the single `nameOf(address)` view; optional in-memory cache |
-| `irc/server.go` | New `agentIRCRegistry atomic.Pointer[agentirc.Registry]` field; init from config in `applyConfig` |
-| `irc/config.go` | New `ERC8004Config` under `accounts.erc8004` (rpc-url, registry-address, chain-id, cache-ttl) |
-| `irc/handlers.go` | `authERC8004Handler` now calls `registry.Resolve(ctx, addr)` after sig verification; 904 if not registered |
+The **fork** is already at `chapter-erc8004-canonical`; the gate logic lives
+in `irc/agentirc/registry.go` (RPC client), `irc/agentirc/sasl.go`
+(`ChallengeBody` with chain + server + agentId binding), `irc/handlers.go`
+(`authERC8004Handler`), and `irc/config.go` (`ERC8004Config`).
 
 In the **chapter directory**:
 
-| File | Purpose |
-|---|---|
-| `contracts/AgentRegistry.sol` | Minimal ERC-8004-compatible registry: `register(name)`, `setName`, `remove`, `nameOf(addr)` |
-| `foundry.toml` | Forge config |
-| `start-anvil.sh` | Local EVM on `:8545` with deterministic accounts |
-| `deploy.sh` | Compile + deploy + register one test agent (`alice-bot`) |
-| `start-ergo.sh` | Pins fork to `chapter-08` tag, regenerates ircd.yaml from defaultconfig, injects the `accounts.erc8004` block, runs |
-| `verify/main.go` | 3-case test: registered, unregistered, sig-mismatch |
-| `verify.sh` | Full orchestration: anvil → deploy → ergo → verify → teardown |
+| File                                                            | Purpose                                                                                  |
+|-----------------------------------------------------------------|------------------------------------------------------------------------------------------|
+| [`contracts/AgentRegistry.sol`](./contracts/AgentRegistry.sol)  | Canonical ERC-8004 Identity Registry (same code as chapter 08a + Base mainnet).          |
+| [`start-anvil.sh`](./start-anvil.sh)                            | Local EVM on `:8545`, deterministic accounts.                                            |
+| [`deploy.sh`](./deploy.sh)                                      | Compile + deploy + register alice-bot + capture agentId from `Registered` event.         |
+| [`start-ergo.sh`](./start-ergo.sh)                              | Pins fork to `chapter-erc8004-canonical`, injects `erc8004` block into `ircd.yaml`.      |
+| [`start-ergo-base.sh`](./start-ergo-base.sh)                    | Same, but pointed at Base mainnet's canonical registry.                                  |
+| [`verify/main.go`](./verify/main.go)                            | 3-case Go test: positive, wrong-signer, nonexistent agentId.                             |
+| [`verify.sh`](./verify.sh)                                      | Local orchestration: anvil → deploy → ergo → verify → teardown.                          |
+| [`verify-mainnet.sh`](./verify-mainnet.sh)                      | Same verify program against Base mainnet via the funded agent in `../.env`.              |
 
 ## Run it
 
@@ -148,203 +155,246 @@ In the **chapter directory**:
 ./verify.sh
 ```
 
-What happens (excerpt):
+What happens:
 
 ```
-=== starting anvil ===
-=== deploying AgentRegistry + registering test agent ===
->> registry deployed at 0x5FbDB2315678afecb367f032d93F642f64180aa3
->> registering anvil-account-1 as agent 'alice-bot'
->> sanity check nameOf(0x70997970...) = "alice-bot"
+=== 1. starting anvil ===
+=== 2. deploying AgentRegistry + registering alice-bot ===
+>> registry @ 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512
+>> alice-bot: agentId=1
+>> sanity check getAgentWallet(1) = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+>> sanity check tokenURI(1)      = data:application/json,{"name":"alice-bot"}
 
-=== starting agent-irc-ergo with ERC-8004 gate ===
-agent-irc : ERC-8004 gate enabled : address : 0x5Fb… : rpc : http://localhost:8545
+=== 3. starting agent-irc-ergo with ERC-8004 gate ===
+  agent-irc : ERC-8004 gate enabled : address : 0xe7f1... : rpc : http://localhost:8545
+  agent-irc : mutation watcher started : interval : 30s
+  listeners : now listening on :16674
 
-=== verify (3 SASL cases) ===
+=== 4. verify (3 SASL cases against the live canonical registry) ===
 --- case 1: positive ---
   alice <- :ergo.test 903 * :Authentication successful
   ✓ accepted
---- case 2: negative (unregistered keypair) ---
-  ghost <- :ergo.test 904 * :SASL ERC8004: address not in registry
-  ✓ rejected: not in registry
---- case 3: negative (registered addr, wrong sig key) ---
-  forger <- :ergo.test 904 * :SASL ERC8004: signature verification failed
-  ✓ rejected: signature mismatch
-PASS: chapter 08 — registry membership gate enforced
+--- case 2: negative (wrong key signing for claimed agentId) ---
+  forger <- :ergo.test 904 * :SASL ERC8004: signer is not the agent's wallet
+  ✓ rejected: wrong signer for claimed agentId
+--- case 3: negative (nonexistent agentId) ---
+  ghost <- :ergo.test 904 * :SASL ERC8004: agentId not in registry
+  ✓ rejected: agentId not in registry
+PASS: chapter 08b — canonical ERC-8004 gate enforced (agentId + getAgentWallet)
 ```
 
-Note that **case 3 fails on signature, not on registry** — the order matters. We verify the signature *first*, registry membership *second*. If we did it the other way around, an attacker who knew a valid agent's address could probe the registry by sending bogus signatures and observing which return "not in registry" vs "sig failed" — a useful oracle. Verifying signature first means an attacker who doesn't have the private key can never distinguish "registered but I can't sign" from "not registered" — both look like 904. Defense in depth.
+**Case 2 fails on the wallet match, not on signature validity.** The
+signature ecrecovers cleanly to the forger's address; it just doesn't match
+what `getAgentWallet` returned. This ordering — resolve registry first
+(step 1), compare wallets second (step 3) — keeps an attacker without the
+private key from distinguishing "valid agentId, I can't sign" from "valid
+sig, but for a different agentId." Both look like 904. Defense in depth.
 
 ## Walkthrough
 
-### The contract: minimal ERC-8004
+### `deploy.sh` — register pattern
 
-`contracts/AgentRegistry.sol` is ~80 lines. It implements the *Identity Registry* portion of ERC-8004 (the spec also defines Reputation and Validation registries; we don't need those for chat). Key state:
-
-```solidity
-mapping(uint256 => Agent)   public  agents;        // agentId → Agent struct
-mapping(address => uint256) public  agentIdOf;     // wallet  → agentId  (reverse)
-mapping(string  => uint256) internal nameIndex;    // name    → agentId  (uniqueness)
-```
-
-The wallet → agentId reverse mapping is what makes the SASL gate possible. The full ERC-8004 spec uses ERC-721 for the agentId NFT; we elide that to keep the contract focused. Production deployments should inherit from OpenZeppelin's `ERC721` so agent IDs are transferable like any NFT.
-
-The single function the SASL gate calls:
-
-```solidity
-function nameOf(address wallet) external view returns (string memory) {
-    uint256 agentId = agentIdOf[wallet];
-    if (agentId == 0) return "";
-    return agents[agentId].name;
-}
-```
-
-Returning empty string for unregistered addresses (rather than reverting) is a deliberate API choice: it lets the Go side treat both cases uniformly with one RPC call, no try/catch on revert reasons.
-
-### Deploying — anvil today, Base mainnet tomorrow
-
-The chapter uses `anvil` so we can run reproducible tests locally without paying gas. Anvil's deterministic accounts mean the tutorial's hard-coded private key (account 1) yields the same address on every run.
-
-For production, the only changes are environment values:
-
-```yaml
-accounts:
-    erc8004:
-        rpc-url: "https://mainnet.base.org"            # was: http://localhost:8545
-        registry-address: "0x..."                       # your deployed contract
-        chain-id: 8453                                  # was: 31337 (anvil)
-        cache-ttl: 60s                                  # was: 0 (test-only)
-```
-
-Deploying to Base:
+`deploy.sh` calls `register(string)` with an **inlined data URI** so the
+off-chain JSON lives on-chain too — no IPFS pin, no HTTPS host needed:
 
 ```bash
-forge create --broadcast --rpc-url https://mainnet.base.org \
-    --private-key $DEPLOYER_KEY \
-    contracts/AgentRegistry.sol:AgentRegistry
+URI="data:application/json,{\"name\":\"alice-bot\"}"
+cast send … "$REGISTRY_ADDR" "register(string)" "$URI"
 ```
 
-Base mainnet has gas costs around ~$0.001 for a registry write at typical L2 prices, which is the user's intent — cheap enough that registration is operationally free for agents.
+Then captures the freshly-minted `agentId` from the
+`Registered(uint256,string,address)` event:
+
+```bash
+REG_TOPIC0=0xca52e62c367d81bb2e328eb795f7c7ba24afb478408a26c0e201d155c449bc4a
+AGENT_ID=$(cast receipt … --json | python3 -c "...print(int(log['topics'][1], 16))...")
+echo "$AGENT_ID" > .alice-agentid
+```
+
+Pinning topic-0 means we don't shell out to `cast keccak` per run, and the
+hash is identical against anvil and Base mainnet because both deploys share
+the same event signature.
 
 ### The Go-side query
 
-We don't generate full ABI bindings (`abigen`) because we only call one method. Hand-rolling keeps the dep surface minimal:
-
-```go
-const registryABIJSON = `[
-  {"inputs":[{"internalType":"address","name":"wallet","type":"address"}],
-   "name":"nameOf",
-   "outputs":[{"internalType":"string","name":"","type":"string"}],
-   "stateMutability":"view","type":"function"}
-]`
-
-calldata, _ := r.abi.Pack("nameOf", wallet)
-res, _ := client.CallContract(ctx, ethereum.CallMsg{To: &r.cfg.RegistryAddress, Data: calldata}, nil)
-out, _ := r.abi.Unpack("nameOf", res)
-name := out[0].(string)
-```
-
-The `nil` block argument means "latest". For higher-stakes use cases you'd pin to a specific block number to ensure the auth decision is consistent — chapter 10's "registry mutation mid-session" discussion picks this up.
+`irc/agentirc/registry.go` hand-rolls the ABI for `getAgentWallet`,
+`tokenURI`, and `ownerOf`. We don't generate full bindings (`abigen`) —
+three methods are easier to inline than a code-gen step is to teach.
 
 ### Fail-closed semantics
 
-The handler order in `irc/handlers.go`:
+The handler's `904` messages disambiguate four failure modes:
 
 ```go
-// 1. signature verification (cryptographic — no network)
-if err := agentirc.VerifyChallenge(addr, nonce, value); err != nil {
-    return 904 "signature verification failed"
-}
+// step 1 — claim agentId, resolve expected wallet
+agentID := common.BytesToHash(value)                       // 32-byte uint256
+addr, err := reg.GetAgentWallet(ctx, agentID)
+if err != nil  { return 904 "agentId not in registry" }    // revert or RPC fail
+if addr == 0x0 { return 904 "agentId has no wallet" }
+sendChallenge(nonce)
 
-// 2. registry membership (network — RPC to Base)
-if reg := server.agentIRCRegistry.Load(); reg != nil {
-    name, regErr := reg.Resolve(ctx, addr)
-    if regErr != nil {
-        return 904 "registry lookup failed"  // RPC down → fail closed
-    }
-    if name == "" {
-        return 904 "address not in registry"
-    }
-}
-
-// 3. account binding
-account, _ := server.accounts.loadWithAutocreation(...)
-server.accounts.Login(client, account)
+// step 3 — verify signature
+recovered, err := agentirc.VerifyChallenge(nonce, value, chainID, server.name, agentID.Big())
+if err != nil               { return 904 "signature verification failed" }
+if recovered != expectedAddr { return 904 "signer is not the agent's wallet" }
 ```
 
-Three failure modes, three distinct `904` messages. The RPC-failure path is the operationally tricky one: if Base's RPC is down or rate-limiting us, every SASL attempt fails. Three mitigations:
+Per-call timeout is 5s. Cache TTL is `0s` by default (correct-but-expensive);
+production should set ~30–60s, then rely on chapter 10's mutation watcher
+to invalidate stale entries.
 
-1. **Per-call timeout** (5 s in our handler). Prevents a single slow RPC from holding a SASL slot for minutes.
-2. **Registry caching** (`CacheTTL`). A successful resolve is cached for that long; agents don't re-pay for RPC on every reconnect.
-3. **A circuit breaker** (not implemented in chapter 08). If ≥N consecutive RPC errors hit, mark the registry as "unhealthy" and serve cached results (or even fail-open for known-good agents) until it recovers. Chapter 10 sketches this as future work.
+### Why bind chain + server + agentId into the signed body
 
-Caching is the spicy one. Our default `cache-ttl: 0` (no caching) is *correct but expensive*. A more reasonable production default is 60s, with a manual flush mechanism for emergencies. Trade-off: a 60s cache means a freshly-registered agent has up to 60s of unauthenticated reconnect attempts being rejected even though they should succeed. That's acceptable.
+`ChallengeBody` produces:
 
-### Why we don't gate during the SCRAM-style handshake
+```
+agent-irc-sasl-v1
+chain=31337
+server=ergo.test
+agentId=1
+nonce=<hex>
+```
 
-You might wonder: why not call the registry between steps 2 and 3 of the SASL exchange? That way an unregistered address never gets challenged, saving a nonce.
+Each line defeats one replay vector:
 
-Two reasons not to:
+| Line          | Replay vector defeated                                              |
+|---------------|---------------------------------------------------------------------|
+| `chain=<id>`  | Sig for chain X (anvil) can't be reused on chain Y (Base).          |
+| `server=`     | Sig for `ergo.test` can't be reused on `irc.production.example`.    |
+| `agentId=<n>` | Sig for agentId 1 can't be reused as agentId 2 by a wallet that     |
+|               | owns both (same key, two on-chain identities).                      |
+| `nonce=`      | Sig can't be replayed within the same chain+server+agentId.         |
 
-1. **Doing the registry check after sig verification is more secure** (the order argument above — preserving the indistinguishability between "not registered" and "wrong key").
-2. **The RPC call adds 100-500 ms in the middle of an auth flow** where the client is waiting on us. Doing it after sig verification means slow RPC pushes only successful auth attempts; failed auth attempts (the common abuse case) bail without ever calling the registry.
+The `agentId` line is new in chapter 08b. It costs us nothing and forecloses
+the one edge case the step-1 wallet pin doesn't already cover.
 
-### The data dependency on chain ID
+## Optional sidebar: verify against Base mainnet
 
-The chapter-08 config has `chain-id: 31337` (anvil's default). Right now we don't use this — the `RegistryConfig.ChainID` field is stored but never sent in any RPC call. It's there for chapter 10, where we'll bind the SIWE message to the chain ID so a signature for chain X cannot be replayed on chain Y. The current sig is over `agent-irc-sasl-v1\nnonce=...`; chapter 10 extends the body to include `chain=8453\nserver=irc.agent-irc.example\n...`.
+`verify-mainnet.sh` runs cases 1 + 2 against the canonical registry. Case 3
+is skipped on mainnet — picking a "guaranteed-unminted" tokenId could
+collide with a future legitimate mint.
 
-## Critical Thinking: trust assumptions about the RPC endpoint
+Prereqs: `../.env` with `AGENT_PRIVATE_KEY` + `AGENT_ADDRESS` + `AGENT_ID`
++ `ERC8004_REGISTRY` + `RPC_URL` + `CHAIN_ID`, plus a `tokenURI(AGENT_ID)`
+that resolves over HTTPS to JSON with a valid `.name`.
 
-The IRC server now trusts the RPC endpoint at `rpc-url`. What does that trust buy you?
+```bash
+./verify-mainnet.sh
+```
 
-If the RPC endpoint is **honest**: SASL gate works as advertised. Only registered addresses authenticate.
+Top to bottom:
 
-If the RPC endpoint is **malicious or compromised**:
+1. **Preflight.** `cast call` the live registry: `getAgentWallet(AGENT_ID)`
+   must match `AGENT_ADDRESS`; `tokenURI(AGENT_ID)` must resolve over HTTPS
+   to JSON whose `.name` is non-empty (we check for `lin-test-bot`).
+2. **Start the fork** pointed at Base mainnet via `start-ergo-base.sh`.
+3. **Run the verify Go program** in `MODE=mainnet` (cases 1 + 2 only).
 
-- It can return arbitrary names for any address. An attacker who controls the RPC endpoint can answer `nameOf(victim_addr) = "spoofed-agent"` and bypass the gate (if they also have a signature, which they don't unless they're the victim). So this attack only matters if the attacker also controls a wallet that *is* registered — and at that point they can already authenticate legitimately.
-- It can return `""` for legitimately registered addresses, locking them out (denial of service).
-- It can selectively answer truthfully for some addresses and lie for others.
+This is the cheapest "is the auth path real?" check; chapter 11's
+`verify-base-mainnet.sh` runs the same shape at the CLI layer.
 
-The first failure mode (selective lying about names) becomes interesting in chapter 09 when the registry-returned name *is* the IRC display name. A malicious RPC could rename agents arbitrarily. Mitigation options:
+## Critical Thinking
 
-1. **Multiple RPC endpoints, quorum.** Query 3 endpoints, only accept matching answers. Doable but expensive.
-2. **Light client verification.** Use a Helios-style light client (Phala's dstack tutorial chapter 07) to verify state proofs. Heavier infrastructure.
-3. **Direct connection to a self-hosted Base node.** Removes the third-party trust assumption at the cost of running infrastructure.
+### Fail-closed semantics on RPC failure
 
-For chapter 08 we trust a single RPC. For a real agent network with adversarial pressure, option 3 is the practical answer: run your own Base RPC node (or use one operated by your organization), and treat the IRC server's `rpc-url` like any other trust-bearing config.
+| Trigger                                  | Outcome                                                  |
+|------------------------------------------|----------------------------------------------------------|
+| `eth_call` times out (5s)                | 904 "agentId not in registry" — *false negative*         |
+| `eth_call` returns a revert              | 904 "agentId not in registry" — true negative            |
+| `getAgentWallet` returns `0x0...0`       | 904 "agentId has no wallet" — true negative              |
+| `ecrecover` fails (malformed sig)        | 904 "signature verification failed"                      |
+| `ecrecover` succeeds but wallet mismatch | 904 "signer is not the agent's wallet"                   |
+| Everything matches                       | 903 "Authentication successful"                          |
 
-## Critical Thinking: when registry membership is the *wrong* gate
+The first row is the spicy one: a legitimate agent gets rejected because the
+RPC was momentarily unreachable, with a misleading "not in registry" message.
+This is fail-closed semantics by design — better to reject the occasional
+legitimate auth than to let an unverified one through — but operationally
+your network's uptime is now bounded by your RPC's uptime, and diagnostically
+the operator can't easily distinguish "registry says no" from "we couldn't
+reach the registry." We could emit a distinct 904 string for each path, but
+that would also tell an attacker which path they hit — a small but real
+information leak. We prefer the unified message.
 
-We've granted "presence in the ERC-8004 registry" the same authority as "you are allowed to chat on this network." Is that always right?
+### Cache TTL trade-off
 
-ERC-8004's design lets *anyone* register an agent. Anyone with $0.001 of Base ETH can mint themselves an agent ID. If your IRC network is selective (only certain agents allowed), the registry membership alone isn't enough — you need an additional allowlist.
+`cache-ttl: 0s` is correct-but-expensive: every SASL attempt produces an RPC
+call. A production-reasonable value is 30s–5m.
 
-The structural fix: layer a second contract on top, e.g. a permissioned `AllowedAgents` set that the IRC server checks instead of (or in addition to) `nameOf`. ERC-8004 itself is *identity*; what authority that identity grants is your application's call.
+The trade: a freshly-rotated wallet (via `setAgentWallet`) will keep matching
+the *old* wallet inside the cache window. Chapter 10's mutation watcher
+solves this asymmetrically — it polls for changes on a 30s interval and
+**invalidates** affected cache entries, so the worst-case stale-cache window
+is bounded by `min(cache-ttl, watcher-interval)`.
 
-For the agent-irc tutorial, "any registered agent can chat" is fine — the running example is a public substrate. Chapter 10 sketches one production pattern (a separate `AllowedAccounts` contract that the channel ACL queries) for users who need finer-grained control.
+### When the tokenURI JSON fetch fails
+
+`getAgentWallet` alone gates the *auth decision*. The HTTP fetch of
+`tokenURI` happens *after* the wallet matched and is used to derive the IRC
+account name. If the JSON fetch fails (HTTP 404, timeout, malformed JSON,
+`.name` empty or not IRC-valid), the handler still hits **904 "registry
+resolve failed"** or **"agent JSON name not IRC-valid"** — even though the
+on-chain half of the resolve succeeded.
+
+This is the trickiest part of the ERC-8004 model: an entry can be
+*on-chain-valid* (owned, minted, wallet correct) but *off-chain-invalid*
+(URI 404s, JSON missing `.name`). Both halves must succeed before the agent
+can speak. Chapter 09 picks up the name-derivation rules; chapter 10's
+watcher catches an off-chain JSON disappearing the same way it catches
+on-chain mutations.
+
+### Vs. the legacy "registry holds the name" assumption
+
+Earlier drafts of chapter 08 had a `mapping(address ⇒ string name)` on the
+contract — the registry was the canonical source of *both* the identity and
+the human-readable name. Canonical ERC-8004 splits these:
+
+| Concern                          | Legacy (08-pre-canonical)         | Canonical (08b)                              |
+|----------------------------------|------------------------------------|----------------------------------------------|
+| Who/what an agent *is*           | `mapping(addr → name)`             | `agentId` (NFT) + `getAgentWallet`           |
+| Human-readable name              | `nameOf(addr)` storage read        | `.name` in off-chain JSON at `tokenURI`      |
+| Name uniqueness                  | Enforced in the contract           | Not enforced on-chain (!)                    |
+| RPC calls per SASL               | 1 (nameOf)                         | 1 (getAgentWallet) + 1 HTTP (chapter 09)     |
+| Reverse lookup (addr→identity)   | Built-in                           | Absent — client must declare `agentId`       |
+| Censorship surface               | On-chain only                      | On-chain + URI host (HTTPS / IPFS)           |
+
+The canonical split is more flexible (the JSON can carry arbitrary metadata
+without re-deploying the registry) and more expensive (HTTP fetch on cold
+cache miss). It also moves the censorship surface partly off-chain: a
+registry entry is hard to take down, but the `agent.json` it points to is
+just an HTTPS URL or an IPFS CID — either can disappear, leaving the
+on-chain entry pointing at nothing. Production deployments mitigate by
+pinning to IPFS via multiple gateways or self-hosting the JSON on
+infrastructure they control.
 
 ## Files
 
 ```
-08-gating-on-the-registry/
-├── contracts/AgentRegistry.sol     # ~80 lines minimal ERC-8004 Identity
+08b-gating-on-the-registry/
+├── contracts/AgentRegistry.sol     # canonical ERC-8004 Identity Registry
 ├── foundry.toml
+├── lib/openzeppelin-contracts/     # ERC721 + ERC721URIStorage + EIP712 + ECDSA
 ├── start-anvil.sh                  # local devnet
-├── deploy.sh                       # forge create + cast send
-├── start-ergo.sh                   # regenerates ircd.yaml from defaultconfig + injects erc8004 block; pins fork to chapter-08 tag
+├── deploy.sh                       # forge create + cast send + capture agentId
+├── start-ergo.sh                   # build chapter-erc8004-canonical + inject erc8004 block
+├── start-ergo-base.sh              # same, but pointed at Base mainnet
 ├── go.mod / go.sum
 ├── verify/main.go                  # 3 SASL cases against the live registry
-├── verify.sh                       # full anvil → deploy → ergo → verify
+├── verify.sh                       # anvil → deploy → ergo → verify
+├── verify-mainnet.sh               # the same, against Base mainnet via ../.env
 └── README.md
 
-# Modified in the fork (~/workspace/agent-irc-ergo, branch agent-irc):
-irc/agentirc/registry.go            # Registry client (new)
-irc/server.go                       # +agentIRCRegistry field, applyConfig hook
-irc/config.go                       # +ERC8004Config struct
-irc/handlers.go                     # +registry check after sig verification
-go.mod / go.sum / vendor/           # +go-ethereum/ethclient transitive deps
+# Already in the fork (~/workspace/agent-irc-ergo @ chapter-erc8004-canonical):
+irc/agentirc/registry.go            # canonical registry client (eth_call + HTTP)
+irc/agentirc/sasl.go                # ChallengeBody: chain + server + agentId binding
+irc/handlers.go                     # authERC8004Handler: agentId-first lookup + ecrec
+irc/config.go                       # ERC8004Config under accounts.erc8004
 ```
 
 ## Next
 
-[Chapter 09 — Identity binding (name = nick)](../09-identity-binding) — we replace `AccountNameForAddress` with the registry-returned name. Successful SASL ERC8004 → IRC nick is the agent's on-chain `name`. Charset normalization, casemapping, NICK-change rejection. After this chapter, ERC-8004 names become first-class on the IRC wire.
+[Chapter 09 — Identity binding (name = nick)](../09-identity-binding) — we
+replace `AccountNameForAddress` with the JSON-derived `.name`. Successful
+SASL ERC8004 → IRC nick is the agent's off-chain JSON `.name`. Charset
+normalization, casemapping, NICK-change rejection. After this chapter,
+ERC-8004 names become first-class on the IRC wire.

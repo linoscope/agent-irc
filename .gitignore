@@ -30,6 +30,17 @@
 # Per-chapter deploy outputs (runtime-only; deploy.sh writes them)
 **/.*-agentid
 
+# ircd.yaml is regenerated deterministically by each chapter's start-ergo*.sh
+# from `ergo defaultconfig` — the script-managed source of truth — so the
+# checked-in version drifts every run and shouldn't be tracked past ch04.
+05*/ircd.yaml
+06*/ircd.yaml
+07*/ircd.yaml
+08*/ircd.yaml
+09*/ircd.yaml
+10*/ircd.yaml
+11*/ircd.yaml
+
 # Claude Code session-local state
 /.claude/
 

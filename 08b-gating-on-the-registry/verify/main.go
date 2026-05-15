@@ -49,7 +49,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -104,6 +103,12 @@ func run() error {
 	}
 
 	fmt.Println("--- case 2: negative (claimed agentId, signed by wrong key) ---")
+	// Public Base RPCs throttle back-to-back eth_calls aggressively; pause
+	// so the fork's getAgentWallet lookup doesn't hit a rate-limit reject
+	// and surface as "agentId not in registry".
+	if *flagMode == "mainnet" {
+		time.Sleep(2 * time.Second)
+	}
 	wrongKey, _ := crypto.GenerateKey()
 	if err := runHandshake("forger", agentID, wrongKey, expectFailWrongSigner); err != nil {
 		return fmt.Errorf("case 2: %w", err)
@@ -364,5 +369,3 @@ func envOrU64(name string, fallback uint64) uint64 {
 	return n.Uint64()
 }
 
-// silence unused import linter when common is dropped from refactors.
-var _ = common.Address{}

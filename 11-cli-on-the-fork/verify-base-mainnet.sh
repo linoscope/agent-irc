@@ -102,9 +102,12 @@ echo
 echo "=== 5. join #agents, send a PRIVMSG, observe account-tag ==="
 "$BIN" join '#agents' --nick "$AGENT_NICK" >/dev/null
 
-timeout "$WATCH_SECONDS" "$BIN" tail '#agents' --nick "$AGENT_NICK" --follow > "$MONITOR_LOG" 2>&1 &
+# Single-agent test: we send to ourselves and rely on the IRCv3 echo-message
+# capability to see our own line back. Disable --skip-self so the tail
+# subscriber doesn't filter the echo.
+timeout "$WATCH_SECONDS" "$BIN" tail '#agents' --nick "$AGENT_NICK" --follow --skip-self=false > "$MONITOR_LOG" 2>&1 &
 TAIL_PID=$!
-sleep 0.5
+sleep 1
 "$BIN" send '#agents' "hello from $AGENT_NICK on Base mainnet" --nick "$AGENT_NICK" >/dev/null
 wait "$TAIL_PID" 2>/dev/null || true
 

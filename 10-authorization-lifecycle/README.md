@@ -1,26 +1,45 @@
-# Chapter 10 — Authorization and lifecycle
+# Chapter 10 — Authorization lifecycle
 
-The closing chapter. We tighten two threats the chapter-07/08/09 designs left open:
+Chapters 06–09 built a registry-gated SASL handshake: at the moment of
+authentication, the server knows which on-chain agent the client is
+speaking for, and the IRC display name is taken from the agent's
+ERC-8004 record. That closes the front door at one point in time.
 
-1. **Cross-context signature replay.** The chapter-07 SASL body signed only `nonce`. A signature for chain X / server A could replay on chain Y / server B. Chapter 10 binds the body to `(chain_id, server_name, nonce)`.
-2. **Stale on-chain authority.** Chapter 09 resolved the registry once at SASL time. After login, the agent could be renamed or deregistered on-chain and the IRC session would happily continue as if nothing had happened. Chapter 10 adds a periodic mutation watcher that KILLs sessions whose authority has been revoked.
+This chapter is about *time*. Two problems remain open after chapter 09:
 
-After this chapter the substrate is *coherent*: at every moment, a session's IRC identity matches the agent's on-chain identity, or the session is being terminated.
+1. **Cross-context signature replay.** A challenge body that only binds
+   to `nonce` can be replayed across chains, across servers, or against
+   a different agent on the same chain. We tighten the SASL body to bind
+   `chain + server + agentId + nonce` so a signature minted for one
+   tuple cannot impersonate any other.
+2. **Stale on-chain authority.** Chapter 09 resolved the registry once,
+   at SASL time. After login, the on-chain record could be mutated —
+   the wallet rotated, the off-chain JSON's `.name` field changed, or
+   the NFT transferred to a new owner — and the IRC session would keep
+   running under the old binding. We add a *mutation watcher* that
+   periodically re-resolves every authenticated session and KILLs any
+   whose on-chain authority has changed.
+
+After this chapter the substrate is *coherent*: at every moment, a
+session's IRC identity matches the agent's on-chain identity, or the
+session is being torn down.
 
 ## Mental model: authentication is a moment, authority is a duration
 
-Chapters 06–09 closed the front door: at the moment of SASL, we know who you are and that you're allowed in.
+Chapters 06–09 closed the front door: at the moment of SASL, we know
+who you are and that you're allowed in.
 
-Two things that can still go wrong:
-
-| Problem | When it happens | Chapter-09 server does what? |
+| Problem | When | Chapter-09 server does |
 |---|---|---|
-| **Cross-context replay.** A signature alice produced for `irc.test-net.com` is captured and re-presented to `irc.prod.com` (or against a different chain id). | At any future SASL attempt to a different server. | Accepts it. The signed body only contained the nonce; nothing tied it to *which* deployment. |
-| **Stale authority.** Alice authenticates on Monday. On Tuesday her on-chain entry is renamed (or removed). On Wednesday her IRC session is still chatting as `alice-bot`. | Continuously, after any successful SASL. | Doesn't notice. The server resolved the registry once, at SASL time, and never looks again. |
+| **Cross-context replay.** Sig minted for `(chain=8453, server=A, agentId=1)` is captured and re-presented against `(chain=31337, server=A, agentId=1)`. | Any future SASL to a different deployment. | Accepts it. The signed body only contained the nonce — nothing tied it to *which* chain, *which* server, or *which* agent. |
+| **Stale authority.** Alice authenticates Monday. Tuesday `setAgentURI` swaps her off-chain JSON to `{"name":"alice2"}`. Wednesday her IRC session is still chatting as `alice-bot`. | Continuously, after any successful SASL. | Doesn't notice. The server resolved the registry once, at SASL time, and never looks again. |
 
-The first is a **static** problem about how the credential is constructed. The fix is to bind the signed message to the deployment context.
+The first is a **static** problem about how the credential is
+constructed. The fix is to bind the signed message to its deployment
+context.
 
-The second is a **temporal** problem about what happens *after* auth succeeds. The fix is to keep checking.
+The second is a **temporal** problem about what happens *after* auth
+succeeds. The fix is to keep checking.
 
 ### Fix 1: bind the signed message to its context
 
@@ -31,38 +50,70 @@ agent-irc-sasl-v1
 nonce=<hex>
 ```
 
-Chapter-10 body:
+Chapter-10 body (with chapter 08+'s `agentId` binding, full form):
 
 ```
 agent-irc-sasl-v1
 chain=<chain_id>
 server=<server_name>
+agentId=<decimal_uint256>
 nonce=<hex>
 ```
 
-Two new lines. The `chain_id` separates testnet (chain 84532) from mainnet (chain 8453). The `server_name` separates `irc.foo.com` from `irc.bar.com`. A signature produced for one (chain, server) pair cannot be re-presented to a different one — `ecrecover` will return a different address because the hashed bytes differ.
+Four lines of structured context. Each component blocks a class of
+replay:
 
-This is **EIP-712's domain separator pattern** in spirit, just expressed in a flat-text EIP-191 envelope. Chapter 10 sticks with EIP-191 for simplicity (no ABI encoding); production should consider EIP-712 for the structured-rendering UX in wallets.
+| Line | What it stops |
+|---|---|
+| `chain=` | Sig minted on testnet (chain 84532) replayed against mainnet (chain 8453), or local anvil (31337) replayed against Base (8453). |
+| `server=` | Sig minted against `irc.foo.com` replayed against `irc.bar.com`, even when both point at the same registry on the same chain. |
+| `agentId=` | Sig minted by an agent registered as id=1 replayed against the slot id=2 (a different on-chain identity using the same wallet). |
+| `nonce=` | Sig minted for a previous SASL session replayed against the next one (the chapter-07 freshness guarantee). |
+
+This is **EIP-712's domain separator pattern** in spirit, just expressed
+in a flat-text EIP-191 envelope. Chapter 10 sticks with EIP-191 for
+implementation simplicity (no ABI encoding); a production-grade SASL
+would consider EIP-712 for the structured-rendering UX in wallets.
+
+A signature for one tuple does not verify against any other tuple
+because the hash of the body differs — `ecrecover` returns a wrong
+address, and the server hits `904 ERR_SASLFAIL`. That's case 1 of
+`verify/main.go`.
 
 ### Fix 2: re-check the authority periodically
 
-A background goroutine in the IRC server walks every authenticated agent-irc client every N seconds (default 30s, 1s in tests) and asks the registry "does this address still resolve to the same name?"
+A background goroutine in the IRC server walks every authenticated
+agent-irc client every N seconds (default 30s, 1s in tests) and asks
+the registry: *does this agentId still resolve to the same wallet and
+the same JSON `.name` that we logged this session in as?*
 
 ```
-                                    server                              registry
-                                    ───                                  ───
-                  every 30s:        for each authenticated agent c:
-                                                                   nameOf(c.agentIRCAddr)?
-                                                                  ─────────────────────────►
-                                                                                              registered?
-                                                                  ◄─────────────────────────
-                                                                  
-                                    if returned "" (removed):     KILL session
-                                    if returned different name:   KILL session
-                                    if returned same name:        no-op
+                       server                          registry
+                       ───                             ───
+   every N seconds:    for each authenticated agent c:
+                                                     Resolve(c.agentIRCAgentID)?
+                                                    ─────────────────────────►
+                                                                                wallet + name
+                                                    ◄─────────────────────────
+
+                       if wallet differs:    KILL session
+                       if .name differs:     KILL session
+                       if both unchanged:    no-op
 ```
 
-KILL here means Ergo's `killClients` path: `Logout` + `Quit` + `destroy`. Forces the wire close even for always-on agents whose normal `Quit` would persist. The agent receives:
+The two branches map directly to the two on-chain mutations the
+ERC-8004 spec exposes for an existing record:
+
+| Mutation | Spec method | What `Resolve` sees next | Watcher branch |
+|---|---|---|---|
+| **Wallet rotation.** Owner reassigns the signing wallet. | `setAgentWallet(agentId, newWallet, deadline, sig)` — EIP-712 signed by the NFT owner. | `getAgentWallet(agentId)` returns a new address. | `res.Wallet != boundAddr` → KILL. |
+| **NFT transfer.** Owner moves the entire ERC-721 to a new address. | `transferFrom(owner, recipient, agentId)` — stock ERC-721. | `getAgentWallet` falls back to `ownerOf`, which now returns the recipient. | Same branch (`res.Wallet != boundAddr`). |
+| **JSON name change.** Owner points the on-chain URI at new JSON. | `setAgentURI(agentId, newURI)` — owner-gated. | `tokenURI(agentId)` returns a new URI, which when HTTP-fetched yields different `.name`. | `res.Name != boundName` → KILL. |
+| **JSON body change without URI change.** The HTTP body at the existing URI is edited. (Owner controls the off-chain server.) | (no on-chain tx) | `tokenURI` unchanged; `fetchAgentName` returns new `.name`. | Same branch (`res.Name != boundName`). |
+
+KILL here means Ergo's `killClients` path: `Logout` + `Quit` + `destroy`.
+That last step is what makes this work for always-on agents whose normal
+`Quit` would otherwise persist. The client sees:
 
 ```
 :alice-bot!~u@host.irc QUIT :You are no longer authorized to be on this server
@@ -70,62 +121,62 @@ ERROR :You are no longer authorized to be on this server
 (socket closes)
 ```
 
-…and can reconnect under their new name (or fail to, if they've been deregistered).
+…and can reconnect under its new wallet / new name if it still has the
+credentials for the *current* on-chain record.
 
 ### Why poll and not subscribe
 
-Polling is the lazy choice. The "right" choice is to subscribe to the registry's `AgentRenamed` and `AgentRemoved` events via WebSocket-RPC `eth_subscribe`. Tradeoff:
+Polling is the lazy choice. The spec-correct production approach is to
+subscribe to the registry's `URIUpdated`, `AgentWalletSet`, and `Transfer`
+events via WebSocket-RPC `eth_subscribe`. Tradeoffs:
 
 | | Polling (chapter 10) | Event subscription |
 |---|---|---|
-| Latency to detection | Up to `interval` (30s default) | ~one block (~2s on Base) |
+| Latency to detection | Up to `interval` (30s default; 1s in tests) | One block (~2s on Base) |
 | RPC cost | O(connected agents) per interval | One long-lived connection |
 | Reorg correctness | Self-healing — next poll catches up | Have to handle reverted events |
-| Implementation | ~80 lines | Substantially more |
+| Implementation | ~80 lines | Substantially more (subscription manager, reconnect, reorg) |
 
-For a tutorial we polled. For ~1000+ agents you'd want event subscription. The mechanism (compare cached state vs current state, KILL on mismatch) is identical.
-
-### What's left after chapter 10
-
-The agent-irc threat model after chapter 10:
-
-✅ Wallet keypair == identity, with chain-bound signatures
-✅ Server-attested account-tag flowing on every wire message
-✅ On-chain registry as the source of truth, polled for mutations
-✅ Cross-deployment replay isolation via signed `chain` + `server` fields
-
-❌ Wallet compromise (mitigation: contract-level rotation)
-❌ Malicious RPC (mitigation: multi-RPC quorum, self-hosted node)
-❌ Compromised IRC server operator (mitigation: TEE deployment — see [dstack-examples](https://github.com/Dstack-TEE/dstack-examples))
-❌ Channel-level ACLs gating on registry roles (future work)
-❌ Rate limits keyed on agent ID (future work)
-
-The chapter's closing summary in this README walks through these explicitly.
+For a tutorial we polled. For ~1000+ agents you'd want event
+subscription. The mechanism (compare cached state vs current state,
+KILL on mismatch) is identical.
 
 ## What you'll learn
 
-- The SIWE/EIP-191 body extension pattern: bind a signature to the *context* of the auth attempt, not just the freshness.
-- A simple mutation-detection design (periodic poll vs event subscription), and the tradeoffs.
+- The SIWE/EIP-191 body-extension pattern: bind a signature to the
+  *context* of the auth attempt, not just to its freshness.
+- A simple mutation-detection design (periodic poll vs event
+  subscription), and the tradeoffs.
 - How Ergo's `killClients` actually tears down even always-on sessions.
+- How the canonical ERC-8004 spec exposes both wallet-level and
+  metadata-level mutations, and how a single `Resolve()` covers both.
 
 ## What you'll build
 
-In the **fork**:
+The fork (`agent-irc-ergo`, tag `chapter-erc8004-canonical`) already
+contains the changes from chapters 06–10. The chapter-10 contributions
+in particular:
 
 | File | Change |
 |---|---|
-| `irc/agentirc/sasl.go` | `ChallengeBody(nonce, chainID, serverID)` includes `chain=` and `server=` lines when bound. `VerifyChallenge` takes the same params |
-| `irc/agentirc/sasl_test.go` | New `TestRejectsCrossChainReplay` |
-| `irc/handlers.go` | Calls `VerifyChallenge` with `chainID = config.Accounts.ERC8004.ChainID` and `serverID = server.name` |
-| `irc/client.go` | New field `Client.agentIRCAddr common.Address` for the watcher to track |
-| `irc/agentirc_watcher.go` (new) | Per-server goroutine: poll registry per ERC8004 client, KILL on rename or removal |
-| `irc/server.go` | Spawns the watcher once at first config load |
+| `irc/agentirc/sasl.go` | `ChallengeBody(nonce, chainID, serverID, agentID)` now also includes `chain=`, `server=`, and `agentId=` lines. Same for `VerifyChallenge`. |
+| `irc/agentirc/sasl_test.go` | New `TestRejectsCrossChainReplay`, `TestAgentIDBinding`. |
+| `irc/handlers.go` | Calls `VerifyChallenge` with `chainID = config.Accounts.ERC8004.ChainID`, `serverID = server.name`, `agentID = <the claimed token id>`. |
+| `irc/client.go` | New fields `Client.agentIRCAddr common.Address` + `Client.agentIRCAgentID common.Hash` for the watcher to track. |
+| `irc/agentirc_watcher.go` | Per-server goroutine: poll `Resolve(agentId)` for each ERC-8004 client, KILL on wallet rotation or name change. |
+| `irc/server.go` | Spawns the watcher once at first config load. |
 
-In the **chapter directory**:
+In this chapter directory:
 
 | File | Purpose |
 |---|---|
-| 3-case verify | (1) cross-chain sig rejected, (2) correct sig succeeds, (3) on-chain rename closes the connection |
+| [`contracts/AgentRegistry.sol`](./contracts/AgentRegistry.sol) | The spec-compliant ERC-8004 Identity Registry (ERC-721 + `agentURI` + `getAgentWallet` + `setAgentWallet` + `setAgentURI`). |
+| [`deploy.sh`](./deploy.sh) | Deploy the registry, register `alice-bot` via `register(agentURI)` with an inlined `data: URI`. |
+| [`start-anvil.sh`](./start-anvil.sh) | Local Ethereum devnet on `:8545`, 1-second blocks. |
+| [`start-ergo.sh`](./start-ergo.sh) | Build the fork at the `chapter-erc8004-canonical` tag, inject the ERC-8004 block into `ircd.yaml`, run on `:16676` with `AGENT_IRC_WATCHER_INTERVAL=1`. |
+| [`verify/main.go`](./verify/main.go) | Three-case end-to-end test: cross-chain replay rejected, happy path succeeds, `setAgentURI` on-chain triggers a watcher-initiated KILL. |
+| [`verify.sh`](./verify.sh) | Orchestrate anvil + deploy + fork + verify, in ~30s. |
+| [`verify-mainnet.sh`](./verify-mainnet.sh) | The same against a fork pointed at the canonical Base mainnet registry. Runs cases 1 + 2 only (case 3 would destructively mutate the production agent record). |
 
 ## Run it
 
@@ -133,89 +184,87 @@ In the **chapter directory**:
 ./verify.sh
 ```
 
-Output (excerpt):
+Expected output (excerpt):
 
 ```
-=== verify (replay protection + mutation watcher) ===
+=== 2. deploy registry + register alice-bot ===
+>> registry @ 0x5FbDB2315678afecb367f032d93F642f64180aa3
+>> registered alice-bot: agentId=1  uri=data:application/json,{"name":"alice-bot"}
+
+=== 3. start agent-irc-ergo (watcher poll = 1s) ===
+  info  : agent-irc  : ERC-8004 gate enabled : address : 0x5FbDB2…
+  info  : agent-irc  : mutation watcher started : interval : 1s
+
+=== 4. verify (replay protection + mutation watcher) ===
 --- case 1: cross-chain replay rejection ---
   ✓ wrong-chain signature rejected
 --- case 2: correct-chain signature succeeds ---
   ✓ alice-bot authenticated and welcomed
---- case 3: mutation watcher KILLs after on-chain rename ---
-  >> sending setName("alice2") on-chain
+--- case 3: mutation watcher KILLs after on-chain JSON rename ---
+  >> setAgentURI(1, "data:application/json,{\"name\":\"alice2\"}") on-chain
   alice-bot <- :alice-bot!~u@host.irc QUIT :You are no longer authorized to be on this server
   ✓ saw server-initiated termination message
   alice-bot <- ERROR :You are no longer authorized to be on this server
   alice-bot got disconnect: EOF
   ✓ connection terminated by mutation watcher
 PASS: chapter 10 — replay protection + mutation watcher KILLs renamed agent
-
-=== ergo log tail ===
-agent-irc  : mutation watcher started : interval : 1s
-agent-irc  : registry rename — KILLing session : addr : 0x70997970C51812dc... : wasName : alice-bot : nowName : alice2
 ```
 
-The verify program triggers `cast send setName(string) "alice2"` on the registry. Within ~2 seconds, Ergo's watcher polls, sees the rename, and emits `QUIT` + `ERROR` + closes the socket.
+The verify program triggers `cast send setAgentURI(uint256,string)`
+with a fresh `data:` URI whose embedded JSON has a different `.name`.
+Within ~1 second, Ergo's watcher polls, sees the mismatch in
+`res.Name`, and runs `killClients`.
 
 ## Walkthrough
 
 ### The new SASL body
 
-The chapter-07 body:
-
-```
-agent-irc-sasl-v1
-nonce=<hex>
-```
-
-The chapter-10 body, when bound:
-
-```
-agent-irc-sasl-v1
-chain=8453
-server=irc.agent-irc.example
-nonce=<hex>
-```
-
 Implementation in `irc/agentirc/sasl.go`:
 
 ```go
-func ChallengeBody(nonce []byte, chainID uint64, serverID string) []byte {
-    if chainID == 0 && serverID == "" {
+func ChallengeBody(nonce []byte, chainID uint64, serverID string, agentID *big.Int) []byte {
+    if chainID == 0 && serverID == "" && agentID == nil {
+        // Chapter-07 legacy form for backward compat with old tests.
         return []byte(Domain + "\nnonce=" + hex.EncodeToString(nonce))
     }
-    return []byte(fmt.Sprintf("%s\nchain=%d\nserver=%s\nnonce=%s",
-        Domain, chainID, serverID, hex.EncodeToString(nonce)))
+    if agentID == nil {
+        return []byte(fmt.Sprintf("%s\nchain=%d\nserver=%s\nnonce=%s",
+            Domain, chainID, serverID, hex.EncodeToString(nonce)))
+    }
+    return []byte(fmt.Sprintf("%s\nchain=%d\nserver=%s\nagentId=%s\nnonce=%s",
+        Domain, chainID, serverID, agentID.String(), hex.EncodeToString(nonce)))
 }
 ```
 
-The chapter-07 path (chainID=0, serverID="") is preserved for backward compat with the chapter-07 verify, but every production caller passes both fields.
+The handler reads `chainID` from `config.Accounts.ERC8004.ChainID` (set
+in `ircd.yaml`'s `accounts.erc8004` block — `31337` for anvil, `8453`
+for Base), `serverID` from `server.name`, and `agentID` from what the
+client claimed in AUTHENTICATE step 1.
 
-The handler reads `chainID` from `config.Accounts.ERC8004.ChainID` and `serverID` from `server.name`. Two networks running the same agent-irc binary against the same registry but with different `server.name` values will produce signatures that don't cross-validate. That's the desired property.
-
-The verify proves it:
+The verify proves the binding:
 
 ```go
 // Sign for chain 8453.
-hash := EIP191Hash(ChallengeBody(nonce, 8453, serverID))
-sig, _ := crypto.Sign(hash, priv)
+body := []byte(fmt.Sprintf("%s\nchain=8453\nserver=%s\nagentId=%s\nnonce=%s",
+    domain, serverName, agentID.String(), hex.EncodeToString(nonce)))
+sig, _ := crypto.Sign(eip191Hash(body), priv)
 
-// Verify with chain 8453 succeeds.
-VerifyChallenge(addr, nonce, sig, 8453, serverID)  // OK
-
-// Verify with chain 10 fails — recovered address won't match.
-VerifyChallenge(addr, nonce, sig, 10, serverID)    // ERROR
+// Server verifies with chain 31337 (its actual chain).
+// ecrecover yields a different address because the hashed bytes differ.
+// Server hits 904: "signer is not the agent's wallet".
 ```
 
-This is identical to EIP-712's domain separator pattern: a structured envelope around the message bound to the network and contract identity.
+This is identical to EIP-712's domain separator pattern: a structured
+envelope around the message, bound to the network and contract identity
+the auth attempt is for.
 
 ### The mutation watcher
 
-`irc/agentirc_watcher.go` ~80 lines. Structure:
+`irc/agentirc_watcher.go` is ~80 lines. The core loop:
 
 ```go
 func (server *Server) watchAgentIRCMutations() {
-    interval := agentIRCMutationInterval()  // 30s default; env override for tests
+    interval := agentIRCMutationInterval()  // env-overridable; 30s default
     for {
         select {
         case <-server.exitSignals: return
@@ -224,135 +273,277 @@ func (server *Server) watchAgentIRCMutations() {
         reg := server.agentIRCRegistry.Load()
         if reg == nil { continue }
 
-        clients := server.snapshotAgentIRCClients()    // brief lock + copy
+        clients := server.snapshotAgentIRCClients()  // brief lock + copy
         var victims []*Client
         for _, c := range clients {
-            currentName, _ := reg.Resolve(ctx, c.agentIRCAddr)
-            if currentName == "" || !strings.EqualFold(currentName, c.accountName) {
+            // Snapshot the bound state under the per-client lock.
+            c.stateMutex.RLock()
+            boundAddr := c.agentIRCAddr
+            agentID  := c.agentIRCAgentID
+            boundName := c.accountName
+            c.stateMutex.RUnlock()
+            if (agentID == common.Hash{}) { continue }  // not an ERC-8004 client
+
+            res, err := reg.Resolve(ctx, agentID)
+            if err != nil { continue }  // fail-open on RPC blip; next tick retries
+
+            if res.Wallet != boundAddr {
+                server.logger.Info("agent-irc", "wallet rotation — KILLing session", …)
                 victims = append(victims, c)
+                continue
+            }
+            if !strings.EqualFold(res.Name, boundName) {
+                server.logger.Info("agent-irc", "agent JSON name change — KILLing session", …)
+                victims = append(victims, c)
+                continue
             }
         }
         if len(victims) > 0 {
-            server.accounts.killClients(victims)       // Logout + Quit + destroy
+            server.accounts.killClients(victims)  // Logout + Quit + destroy
         }
     }
 }
 ```
 
-`killClients` is Ergo's existing teardown helper (used by `Suspend` and the K-line path) that:
+`Resolve(agentId)` is the single primitive that catches both mutation
+classes. From `irc/agentirc/registry.go`:
+
+```go
+type Resolution struct {
+    AgentID common.Hash    // 32-byte big-endian uint256
+    Wallet  common.Address // getAgentWallet(agentId)
+    URI     string         // tokenURI(agentId)
+    Name    string         // .name field from off-chain JSON at URI
+}
+```
+
+So one tick costs *per ERC-8004 client*:
+- one `getAgentWallet` eth_call,
+- one `tokenURI` eth_call,
+- one HTTP GET to fetch the JSON (skipped for `data:` URIs).
+
+That's the polling cost. For a tutorial-sized network it's fine. For
+production see the next section.
+
+### `killClients`: the always-on KILL
+
+`killClients` is Ergo's existing teardown helper (used by `Suspend` and
+the K-line path) that:
 
 1. `Logout()` — clears the session's account binding.
-2. `Quit("...message...", nil)` — sends `:nick!user@host QUIT :reason` to every channel, queues `ERROR :reason` to the client's socket.
-3. `destroy(nil)` — closes the socket synchronously, ignoring always-on persistence.
+2. `Quit("...message...", nil)` — sends `:nick!user@host QUIT :reason`
+   to every channel, queues `ERROR :reason` on the client's socket.
+3. `destroy(nil)` — closes the socket synchronously, ignoring always-on
+   persistence.
 
-The `destroy` step is what makes this work for always-on agents. A vanilla `Quit()` on an always-on client only signals the human-facing layer; the always-on identity persists. `destroy(nil)` (with `nil` session = "all sessions") forces the wire close.
+The `destroy` step is the critical one for an agent network. A vanilla
+`Quit()` on an always-on client only signals the human-facing layer;
+the always-on identity stays alive (that's what "always on" *means*).
+`destroy(nil)` (with `nil` session = "all sessions for this account")
+forces the wire close even for those — exactly right when the on-chain
+authority underwriting the always-on grant has just been revoked.
 
-### Poll vs subscribe
+### Poll vs subscribe (the long version)
 
-Our watcher polls. The alternative would be to subscribe to `AgentRenamed` and `AgentRemoved` events via a WebSocket-RPC `eth_subscribe` to the chain. The trade-offs:
+The spec emits two events that the watcher could subscribe to instead
+of polling:
+
+- `URIUpdated(agentId, newURI, updatedBy)` — fired by `setAgentURI`.
+- `AgentWalletSet(agentId, newWallet)` + `AgentWalletUnset(agentId)` —
+  fired by `setAgentWallet` / `unsetAgentWallet`.
+- `Transfer(from, to, agentId)` (inherited from ERC-721) — fired by
+  `transferFrom` and friends.
+
+A production watcher would `eth_subscribe` to these three topics
+filtered on the registry address, maintain an in-memory map of
+`agentId → bound state`, and KILL when an event touches a tracked
+agent. The trade-off shape:
 
 | | Polling | Event subscription |
 |---|---|---|
-| Latency to detection | Up to `interval` | ~block time |
-| RPC load | O(connected agents) per interval | 1 long-lived connection |
-| Fault tolerance | Each poll is independent | Need reconnect logic |
-| Implementation complexity | Trivial | Substantial — subscription manager, reorg handling |
-| Accuracy under reorg | Self-correcting (next poll catches up) | Have to reverse re-issued events |
+| Latency to detection | Up to `interval` | ~one block |
+| RPC load | O(connected agents) × ticks | 1 long-lived connection |
+| Fault tolerance | Each poll independent — RPC blips don't accumulate state | Need reconnect logic + state-reconstruction on resume |
+| Accuracy under reorg | Self-correcting — next poll catches up | Have to reverse re-issued events |
+| Implementation | ~80 lines | Several hundred + careful reorg handling |
 
-For chapter 10 we polled. For production with many agents, event subscription wins because the RPC cost grows with the number of connected agents, not the chain's tx rate. Worth doing as a follow-up.
+The break-even on RPC cost is roughly when *connected agents × ticks
+per minute* exceeds the chain's write rate on the registry — say a few
+thousand always-on clients with a 30-second poll. Below that, polling
+is fine and substantially simpler.
 
-### The watcher's race conditions
+There's also a security argument worth noting: polling is
+*self-healing*. If the RPC returns stale data for one tick, the next
+tick re-checks. Event subscriptions silently fail if you miss a
+`URIUpdated` event during a websocket reconnect, and you don't notice
+until something visibly breaks. The polling design is harder to silently
+poison.
 
-Two races worth thinking about:
+### Race conditions worth knowing about
 
-1. **A client just authenticated, and the watcher polls before the next block confirms.** If the agent registered or renamed on-chain at block N, and we authenticated against block N's state, but the watcher polls at block N+1 and sees the *previous* name (RPC providers often serve from a slightly-stale cache), we'd KILL a legitimate session. Mitigation: the watcher should pin queries to the same block (or later) as the SASL check pinned to.
-2. **A client is mid-SASL handshake, between the registry check and `Login`.** During this window the client has `agentIRCAddr` unset and `accountName == ""`. Our snapshot skips clients without `agentIRCAddr`, so this is a no-op. But: if the SASL handler ever set `agentIRCAddr` *before* `accountName`, we'd see a transient mismatch and KILL. The order matters; we set `agentIRCAddr` after `Login` completes.
+1. **A client just authenticated, and the watcher polls before the next
+   block confirms.** If we authenticated against block N's state, but
+   the watcher polls at block N+1 (RPC providers sometimes serve from
+   a slightly-stale cache), we'd potentially KILL a legitimate session.
+   Mitigation: the watcher should pin queries to the same block (or
+   later) as SASL pinned to. The current implementation does not — RPC
+   freshness is a documented assumption.
 
-Neither race materializes in practice with the chapter-10 implementation, but they're worth documenting because production hardening would tighten them.
+2. **A client is mid-SASL handshake, between the registry check and
+   `Login`.** During this window the client has `agentIRCAgentID` unset
+   and `accountName == ""`. Our snapshot skips clients without
+   `agentIRCAgentID` (`if (agentID == common.Hash{}) { continue }`), so
+   this is a no-op. But: if the SASL handler ever set
+   `agentIRCAgentID` *before* `Login`, we'd see a transient mismatch
+   and KILL. The order matters; we set `agentIRCAgentID` after `Login`
+   completes (see `handlers.go`).
+
+Neither race materializes in practice with the current implementation,
+but they're worth documenting because production hardening would
+tighten them.
 
 ### Replay protection composes with the mutation watcher
 
-Both fixes target a single underlying problem: *bound a credential to its context*.
+Both fixes attack the same underlying problem: *bind a credential to
+its context*. The body extension binds the SASL credential to *which
+network, server, and agentId* it was issued for. The watcher binds the
+*liveness* of that credential to the current on-chain state. Together:
+you can only authenticate as alice if (a) the signature is for this
+(chain, server, agentId) tuple, and (b) you're still alice on-chain at
+every watcher poll.
 
-- The body extension binds the SASL credential to *which network* and *which server* it was issued for.
-- The watcher binds the *liveness* of the credential to the current on-chain state.
+## Critical Thinking
 
-Together: you can only authenticate as alice if (a) the signature is for this network and server, and (b) you're still alice on-chain at the moment of every subsequent poll.
+A few angles worth thinking through before deploying this in anger.
 
-The "what context" question is the right framing for any auth design. A signature that authorizes "X to Y at time T on network N" is sound; a signature that just says "X to Y" is replayable across N and T.
+### Gas cost of mutation-watching
 
-## Critical Thinking: what we left out
+The watcher itself spends *zero* gas — it only *reads* from the chain.
+The cost is on the RPC provider side: one `eth_call` per (connected
+agent × poll interval) for `getAgentWallet`, another for `tokenURI`.
+A 1000-agent network at 30s polling = ~67 eth_calls/sec. Comfortably
+inside a free-tier Alchemy / QuickNode limit; trivially inside a
+self-hosted node. For 10× that scale, switch to event subscription.
 
-A complete production-ready agent-irc would also include:
+The *mutation* itself costs whoever signed it: `setAgentURI` and
+`setAgentWallet` are ~50k gas each. The chapter-10 verify pays this on
+every run, against anvil; on Base mainnet at ~$0.01/M gas it'd be
+fractions of a cent. The economics aren't the constraint.
 
-1. **Channel ACLs that key on registry membership.** A `+R` (registered-only) channel mode that consults the registry. We have `account-tag` carrying the registered name; a custom mode `+E` ("ERC-8004 gated") would only allow JOIN from clients whose agent-tag is currently registered. Bonus: a custom mode `+E:<role>` that gates on a separate role registry (chapter 08's "permissioned AllowedAgents" idea).
-2. **Event-subscription mutation watcher.** As discussed above.
-3. **Per-account rate limits keyed on the registry agent ID.** Currently we have Ergo's per-IP rate limits and per-account login throttle. A high-traffic agent network would want budgets like "agent X may send N messages/second across all sessions and channels."
-4. **Cross-server replay for federated deployments.** If we ever federate, the body should bind to the *source* server, not just the IRC network. ERC-8004 itself has chain-id binding via the EIP, so this becomes "(chain_id, source_server_id, network_id)."
-5. **Tighter auth-window scoping.** The SIWE-style spec adds `issued-at` and `expires-at` timestamps. Our nonce is fresh, so this only matters if a client could buffer signatures ahead of time. Easy to add for completeness.
-6. **EIP-712 typed-data signing.** EIP-191 personal_sign is universal but renders as raw text in wallets. EIP-712 lets MetaMask show a structured "Login to agent-irc on Base" prompt with named fields.
-7. **Session resumption semantics across registry mutation.** Right now a renamed agent is KILLed. They could re-authenticate immediately under the new name. A friendlier flow: send a `RENAME` notification to the client, give them N seconds to re-authenticate without losing channel state. This is invasive (you'd touch always-on persistence) but feels right operationally.
+### Latency between rotation and KILL
 
-These are all incremental on top of the chapter-10 design. None require touching the core SASL mechanism — they're either contract-side (1, 3, parts of 4), config-side (5), or operationally on top (6, 7).
+Worst-case latency = `interval` (30s default). For most agent networks
+this is fine: 30s of stale-binding usage after a rotation is not a
+security catastrophe. If you need tighter, lower the interval — but
+note that each halving doubles RPC load. The "right" answer at scale
+is event subscription, which gets you to ~block time (~2s on Base).
 
-## Critical Thinking: the threat model, written down
+### What if the watcher's RPC is offline?
 
-The composed design (chapters 7-10) protects against:
+The current implementation logs a debug line on `reg.Resolve` errors
+and continues to the next agent: *fail-open*. This is deliberate — a
+flaky RPC should not cause mass disconnects. The cost is a window where
+mutations go undetected.
 
-- **Anyone without the wallet keypair.** No way to authenticate as the corresponding address.
-- **Sniff-and-replay across deployments / chains.** Body binding to chain_id + server name.
-- **Sniff-and-replay within a deployment.** Server-issued nonce, single-session.
-- **Continued operation after on-chain authority revoked.** Mutation watcher KILLs.
-- **Pre-authentication abuse.** Fakelag, registration timeout, IRCv3 cap negotiation gates SASL behind connect-state.
+The alternative is fail-closed: count consecutive errors, KILL after
+N. That's stricter but introduces a new DoS vector (induce RPC errors,
+watch the network self-immolate). Production should likely keep
+fail-open and add an alerting metric ("watcher has failed N times in a
+row") rather than a punitive action.
+
+### `setAgentWallet` EIP-712 vs `transferFrom`
+
+The spec offers two paths to rotate the signing wallet:
+
+| | `setAgentWallet` | `transferFrom` |
+|---|---|---|
+| Mechanism | EIP-712 signature by NFT owner; pre-sign the rotation, anyone can submit. | Stock ERC-721 transfer; tx from current owner. |
+| What rotates | The `_agentWallet[agentId]` mapping. `ownerOf` is unchanged. | The whole NFT (and therefore both `ownerOf` and the implicit fallback wallet). |
+| Use case | Owner keeps custody of the identity, but wants a different signing key (e.g. hardware wallet for ownership, hot wallet for SASL). | Selling / handing the identity to a new owner entirely. |
+| Watcher detection | `getAgentWallet(agentId)` returns the new address. | `getAgentWallet` falls back to `ownerOf`, which is now the recipient. |
+
+Both end up in the same watcher branch (`res.Wallet != boundAddr`).
+From the IRC server's perspective, "the signing wallet of record
+changed" is the only fact that matters; how that change happened
+(rotation vs sale) is orthogonal.
+
+The EIP-712 signature on `setAgentWallet` is itself a small lesson in
+auth-credential composition: it binds the rotation to `(agentId,
+newWallet, deadline)`, EIP-712-domain-separated by `(name="AgentRegistry",
+version="1", chainId, verifyingContract)`. Sound design — even the
+contract that's the source of truth for SASL bindings is itself
+using the same "bind every signature to its context" pattern internally.
+
+### The threat model, written down
+
+The composed chapter-06-through-10 design protects against:
+
+- **Anyone without the wallet keypair.** No way to authenticate as the
+  corresponding `agentId` — `ecrecover` won't recover the right address.
+- **Sniff-and-replay across chains, servers, or agents.** Body binding
+  to `chain + server + agentId`.
+- **Sniff-and-replay within a single SASL session.** Server-issued
+  nonce, single-use.
+- **Continued operation after on-chain authority is revoked.** Mutation
+  watcher KILLs.
+- **Pre-authentication abuse.** Fakelag, registration timeout, IRCv3
+  cap negotiation gates SASL behind connection-state.
 
 It does **not** protect against:
 
-- **Wallet compromise.** If the keypair leaks, the attacker is indistinguishable from the legitimate agent. Mitigation: contract-level `setAgentWallet` for rotation; agent-side: HSM, MPC custody, transaction-screening for unusual SASL attempts.
-- **RPC endpoint compromise.** A malicious RPC can lie about names, lock out agents, or selectively answer. Mitigation: multi-RPC quorum, light-client verification, self-hosted node.
-- **Server operator going bad.** The server can KILL anyone, change account state, log credentials. Mitigation: TEE-based deployment (see dstack-examples/tutorial), reproducible builds, attestation.
-- **Front-running on registry writes.** An attacker who watches the mempool can race-register a name a legitimate user is about to claim. Mitigation: name-claim with commit-reveal (separate contract).
-- **DoS by mass-registering bot agents.** ERC-8004 itself has no rate limit. Mitigation: a registration fee in the contract, or an external allowlist (chapter-08's "permissioned AllowedAgents" idea).
-- **Side-channel attacks.** Timing attacks on the SASL handler, traffic-pattern fingerprinting, etc. Out of scope.
+- **Wallet compromise.** If the keypair leaks, the attacker is
+  indistinguishable from the legitimate agent. Mitigation: rotate via
+  `setAgentWallet`; agent-side use an HSM or MPC custody.
+- **Malicious RPC.** A lying RPC can fake names, lock out agents, or
+  selectively answer. Mitigation: multi-RPC quorum, light-client
+  verification, self-hosted node.
+- **Compromised server operator.** The server can KILL anyone, change
+  account state, log credentials. Mitigation: TEE deployment (see
+  [dstack-examples](https://github.com/Dstack-TEE/dstack-examples)),
+  reproducible builds, attestation.
+- **Front-running on registry writes.** An attacker who watches the
+  mempool can race-register a name (well, an `agentURI`) a legitimate
+  user is about to claim. Mitigation: commit-reveal in the registry
+  contract, off-spec.
+- **DoS by mass-registering bot agents.** ERC-8004 itself has no rate
+  limit on `register`. Mitigation: a registration fee in the contract
+  or an external allowlist.
+- **Side-channel attacks.** Timing on the SASL handler,
+  traffic-pattern fingerprinting. Out of scope.
 
-This is the closing summary. The agent-irc threat model is not "protect against everything" — it's "make wallet keypair == identity, with the chain as the source of truth." Each remaining threat is addressed by a different layer (PKI, RPC ops, TEE, contracts).
+This is the closing summary. The chapter-10 threat model is not
+"protect against everything" — it's "make wallet keypair == identity,
+with the chain as the source of truth, *for as long as the binding
+holds*." Each remaining threat is addressed by a different layer (PKI,
+RPC ops, TEE, contracts).
 
 ## Files
 
 ```
 10-authorization-lifecycle/
-├── contracts/AgentRegistry.sol     # vendored
+├── contracts/AgentRegistry.sol     # spec-compliant ERC-8004 (ERC-721)
 ├── foundry.toml
+├── lib/openzeppelin-contracts/     # vendored OZ
 ├── start-anvil.sh, deploy.sh, start-ergo.sh
 ├── go.mod / go.sum
 ├── verify/main.go                  # 3 cases: cross-chain, success, mutation-KILL
-├── verify.sh                       # full orchestration with ergo log dump
+├── verify.sh                       # local anvil orchestration + ergo log dump
+├── verify-mainnet.sh               # the same against Base mainnet (cases 1+2)
 └── README.md
 
-# Modified in the fork (~/workspace/agent-irc-ergo, branch agent-irc):
-irc/agentirc/sasl.go             # ChallengeBody(nonce, chainID, serverID)
-irc/agentirc/sasl_test.go        # +TestRejectsCrossChainReplay
-irc/agentirc_watcher.go (new)    # periodic mutation poll, killClients on mismatch
-irc/handlers.go                  # +chain/server binding in VerifyChallenge call
-irc/client.go                    # +agentIRCAddr field
+# Modified in the fork (~/workspace/agent-irc-ergo, tag chapter-erc8004-canonical):
+irc/agentirc/sasl.go             # ChallengeBody(nonce, chainID, serverID, agentID)
+irc/agentirc/sasl_test.go        # +TestRejectsCrossChainReplay, +TestAgentIDBinding
+irc/agentirc_watcher.go          # periodic Resolve() poll, killClients on mismatch
+irc/handlers.go                  # +chain/server/agentId binding in VerifyChallenge
+irc/client.go                    # +agentIRCAddr, +agentIRCAgentID fields
 irc/server.go                    # spawns watcher via sync.Once
 ```
 
-## Tutorial conclusion
+## Next
 
-Ten chapters. From a 120-line raw-TCP IRC server to a registry-gated agent network with on-chain identity binding and registry-mutation lifecycle awareness.
-
-What you have at the end:
-
-- A working `agent-irc-ergo` fork ready to deploy against Base mainnet (swap RPC URL and contract address; everything else stays the same).
-- A reference ERC-8004 Identity Registry deployable to Base (`forge create --rpc-url https://mainnet.base.org`).
-- An understanding of the IRC wire protocol from line framing to IRCv3 to TS6's design lessons that informs every customization decision.
-- A test harness pattern (per-chapter `verify.sh`) that gives you a regression check whenever you touch the fork.
-
-Where to go next:
-
-- Channel-level ACLs gating on registry roles (`+E:operator`, `+E:auditor`).
-- Event-subscription mutation watcher.
-- TEE deployment with reproducible builds (see [dstack-examples/tutorial](https://github.com/Dstack-TEE/dstack-examples/tree/master/tutorial)).
-- A real Base mainnet deployment of the registry.
-
-Each of these is one-to-three days of work building on what's here. The interesting part — IRC + ERC-8004 fused at the SASL layer — is done.
+The server is done. The matching *client* surface — `agent-irc connect
+--erc8004-key … --agent-id …` — is what [`../11-cli-on-the-fork`](../11-cli-on-the-fork/)
+builds: a wallet-keypair-driven IRC client that produces the signatures
+this chapter just learned to bind, talking to the fork this chapter
+just finished building.

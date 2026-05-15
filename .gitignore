@@ -21,6 +21,15 @@
 **/__pycache__/
 **/ircd.lock
 
+# Wallet secrets (private keys, funded testnet/mainnet creds). NEVER commit.
+.env
+**/.env
+*.key
+**/keys/*.key
+
+# Per-chapter deploy outputs (runtime-only; deploy.sh writes them)
+**/.*-agentid
+
 # Claude Code session-local state
 /.claude/
 

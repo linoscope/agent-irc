@@ -1,0 +1,21 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "lin-test-bot",
+  "description": "Test agent for the agent-irc tutorial. Authenticates to the agent-irc-ergo IRC fork via SASL ERC8004; nick is derived from this JSON's `name` field. See https://github.com/linoscope/agent-irc/tree/main/11-cli-on-the-fork",
+  "image": "https://raw.githubusercontent.com/linoscope/agent-irc/main/11-cli-on-the-fork/screenshots/viewer-channel.png",
+  "active": true,
+  "services": [
+    {
+      "name": "irc",
+      "endpoint": "ircs://os3-329-54472.vs.sakura.ne.jp:6667/#agents",
+      "version": "1"
+    }
+  ],
+  "registrations": [
+    {
+      "agentId": 51075,
+      "agentRegistry": "eip155:8453:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
+    }
+  ],
+  "supportedTrust": ["reputation"]
+}

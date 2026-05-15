@@ -1,43 +1,63 @@
 #!/usr/bin/env bash
-# verify.sh — chapter 08 end-to-end:
-#   1. start anvil
-#   2. deploy AgentRegistry, register one agent
-#   3. start agent-irc-ergo with the gate enabled
-#   4. run 3 SASL cases (positive, not-registered, sig-mismatch)
-set -euo pipefail
+# verify.sh — chapter 08b end-to-end against a local anvil.
+#
+# Steps:
+#   1. boot anvil
+#   2. deploy canonical AgentRegistry, register alice-bot, capture agentId
+#   3. start agent-irc-ergo (chapter-erc8004-canonical tag) with the gate on
+#   4. run the 3-case Go verify program against the live registry
+#
+# Cleanup: trap kills both background processes and removes temp files
+# regardless of how the script exits.
+set -uo pipefail
 cd "$(dirname "$0")"
 
 ANVIL_LOG=$(mktemp)
 ERGO_LOG=$(mktemp)
-trap 'kill $ANVIL_PID 2>/dev/null || true; kill $ERGO_PID 2>/dev/null || true; rm -f "$ANVIL_LOG" "$ERGO_LOG"' EXIT
+ANVIL_PID=""
+ERGO_PID=""
 
-echo "=== starting anvil ==="
+cleanup() {
+    [[ -n "$ERGO_PID"  ]] && kill "$ERGO_PID"  2>/dev/null
+    [[ -n "$ANVIL_PID" ]] && kill "$ANVIL_PID" 2>/dev/null
+    sleep 0.3
+    rm -f "$ANVIL_LOG" "$ERGO_LOG"
+}
+trap cleanup EXIT INT TERM
+
+echo "=== 1. starting anvil ==="
 ./start-anvil.sh > "$ANVIL_LOG" 2>&1 &
 ANVIL_PID=$!
-for i in $(seq 1 50); do
-    if cast client --rpc-url http://localhost:8545 >/dev/null 2>&1; then break; fi
+for _ in $(seq 1 50); do
+    cast client --rpc-url http://localhost:8545 >/dev/null 2>&1 && break
     sleep 0.1
 done
+if ! cast client --rpc-url http://localhost:8545 >/dev/null 2>&1; then
+    echo "FAIL: anvil did not start"
+    tail -20 "$ANVIL_LOG"
+    exit 1
+fi
+echo "  ok"
 
 echo
-echo "=== deploying AgentRegistry + registering test agent ==="
+echo "=== 2. deploying AgentRegistry + registering alice-bot ==="
 ./deploy.sh
 
 echo
-echo "=== starting agent-irc-ergo with ERC-8004 gate ==="
+echo "=== 3. starting agent-irc-ergo with ERC-8004 gate ==="
 ./start-ergo.sh > "$ERGO_LOG" 2>&1 &
 ERGO_PID=$!
-for i in $(seq 1 60); do
+for _ in $(seq 1 80); do
     grep -q "now listening on" "$ERGO_LOG" 2>/dev/null && break
-    sleep 0.1
+    sleep 0.3
 done
-if ! grep -q "ERC-8004 gate enabled" "$ERGO_LOG"; then
-    echo "FAIL: gate did not enable. Ergo log:"
-    cat "$ERGO_LOG"
+if ! grep -q "now listening on" "$ERGO_LOG"; then
+    echo "FAIL: Ergo did not start"
+    tail -30 "$ERGO_LOG"
     exit 1
 fi
-grep "ERC-8004 gate" "$ERGO_LOG"
+grep -E "agent-irc|listening on" "$ERGO_LOG" | head -5 | sed 's/^/  /'
 
 echo
-echo "=== verify (3 SASL cases) ==="
+echo "=== 4. verify (3 SASL cases against the live canonical registry) ==="
 go run ./verify

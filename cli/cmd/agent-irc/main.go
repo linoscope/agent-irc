@@ -104,6 +104,7 @@ func usage(w io.Writer) {
 
 usage:
   agent-irc connect SERVER:PORT --nick NICK [--tls] [--password PW]
+                                            [--erc8004-key PATH --chain-id N --server-name NAME]
   agent-irc join     CHANNEL
   agent-irc part     CHANNEL [--reason "..."]
   agent-irc send     TARGET "text"
@@ -126,9 +127,17 @@ func cmdConnect(args []string) int {
 	nick := fs.String("nick", "", "IRC nickname (required)")
 	useTLS := fs.Bool("tls", false, "use TLS to dial the server")
 	password := fs.String("password", "", "SASL PLAIN password (optional)")
+	erc8004Key := fs.String("erc8004-key", "", "path to hex-encoded ECDSA key (enables ERC8004 SASL)")
+	agentID := fs.Uint64("agent-id", 0, "ERC-8004 agent token id this key is registered as (required with --erc8004-key against ch08+ servers)")
+	chainID := fs.Uint64("chain-id", 0, "chain id bound into the ERC8004 signature (e.g. 8453 for Base mainnet, 31337 for anvil)")
+	serverName := fs.String("server-name", "", "IRC server name bound into the ERC8004 signature (e.g. ergo.test)")
 	fs.Parse(reorderArgs(args))
 	if fs.NArg() < 1 || *nick == "" {
-		fmt.Fprintln(os.Stderr, "usage: agent-irc connect SERVER:PORT --nick NICK [--tls] [--password PW]")
+		fmt.Fprintln(os.Stderr, "usage: agent-irc connect SERVER:PORT --nick NICK [--tls] [--password PW] [--erc8004-key PATH --agent-id N --chain-id N --server-name NAME]")
+		return 2
+	}
+	if *erc8004Key != "" && (*chainID == 0 || *serverName == "") {
+		fmt.Fprintln(os.Stderr, "--erc8004-key requires --chain-id and --server-name")
 		return 2
 	}
 	server := fs.Arg(0)
@@ -151,6 +160,16 @@ func cmdConnect(args []string) int {
 	)
 	if *useTLS {
 		cmd.Args = append(cmd.Args, "--tls")
+	}
+	if *erc8004Key != "" {
+		cmd.Args = append(cmd.Args,
+			"--erc8004-key", *erc8004Key,
+			"--chain-id", fmt.Sprintf("%d", *chainID),
+			"--server-name", *serverName,
+		)
+		if *agentID != 0 {
+			cmd.Args = append(cmd.Args, "--agent-id", fmt.Sprintf("%d", *agentID))
+		}
 	}
 	logPath := daemon.SocketPath(*nick) + ".log"
 	logFile, _ := os.Create(logPath)
@@ -309,14 +328,23 @@ func cmdDaemon(args []string) int {
 	nick := fs.String("nick", "", "")
 	useTLS := fs.Bool("tls", false, "")
 	password := fs.String("password", "", "")
+	erc8004Key := fs.String("erc8004-key", "", "")
+	agentID := fs.Uint64("agent-id", 0, "")
+	chainID := fs.Uint64("chain-id", 0, "")
+	serverName := fs.String("server-name", "", "")
 	fs.Parse(reorderArgs(args))
 	if *server == "" || *nick == "" {
 		fmt.Fprintln(os.Stderr, "daemon: --server and --nick required")
 		return 2
 	}
-	srv := daemon.New(daemon.Config{
+	srv, err := daemon.New(daemon.Config{
 		Server: *server, Nick: *nick, TLS: *useTLS, Password: *password,
+		ERC8004KeyPath: *erc8004Key, AgentID: *agentID, ChainID: *chainID, ServerName: *serverName,
 	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "daemon:", err)
+		return 1
+	}
 	if err := srv.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "daemon:", err)
 		return 1

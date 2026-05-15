@@ -1,24 +1,37 @@
 // verify exercises chapter 10:
 //
-//   1. cross-chain replay protection: the SASL body now binds to chainID +
-//      server name. A signature for chain X must not verify against chain Y.
-//      This is unit-tested in irc/agentirc/sasl_test.go (already passing);
-//      this verify program also exercises it end-to-end.
+//   1. Cross-chain replay protection. The SASL body binds to chainID +
+//      serverID + agentId. A signature minted for chain X must not verify
+//      against chain Y because ecrecover will return a different address.
 //
-//   2. mutation watcher: alice authenticates, the test then renames her
-//      registry entry on-chain, and within ~2s the server emits ERROR /
-//      closes the connection. We assert the connection drops.
+//   2. Happy path. Standard ERC-8004 SASL using the agent registered by
+//      deploy.sh. Confirms the canonical wire shape (agentId in step 1,
+//      EIP-191 signature over the body in step 3) works end-to-end.
+//
+//   3. JSON .name change KILLs the session. After case 2 authenticates,
+//      we call setAgentURI(agentId, "data:application/json,{name:alice2}")
+//      on-chain. Within a few watcher cycles, Ergo notices the bound name
+//      no longer matches and tears down the session (Logout + Quit +
+//      destroy → socket close).
+//
+// Case 4 (wallet rotation via transferFrom) is the symmetric test for
+// the watcher's other branch. Skipped here to keep verify under a minute;
+// the code path is identical in shape (Resolve returns a different
+// .Wallet → watcher logs "wallet rotation" → killClients).
 package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/ecdsa"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,13 +39,23 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+// Build-time overridable knobs. The local-anvil defaults below are what
+// `./verify.sh` exercises; `./verify-mainnet.sh` overrides them via -ldflags
+// to point the same binary at Base mainnet.
+var (
+	port       = "16676"
+	chainIDStr = "31337"
+	serverName = "ergo.test"
+	aliceKey   = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+	rpcURL     = "http://localhost:8545"
+	skipCase3  = ""
+)
+
 const (
-	port            = "16676"
-	domain          = "agent-irc-sasl-v1"
-	chainID         = uint64(31337)
-	serverName      = "ergo.test"
-	registeredKey   = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-	registryAddrEnv = ".registry-address"
+	domain        = "agent-irc-sasl-v1"
+	registryFile  = ".registry-address"
+	agentIDFile   = ".alice-agentid"
+	watcherWindow = 8 * time.Second // ~watcher_interval × 5
 )
 
 func main() {
@@ -47,65 +70,67 @@ func run() error {
 	if !portReady(port, 5*time.Second) {
 		return fmt.Errorf("Ergo not listening on :%s", port)
 	}
-	key, _ := crypto.HexToECDSA(registeredKey)
+	chainID, err := strconv.ParseUint(chainIDStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parse chainID %q: %w", chainIDStr, err)
+	}
+	key, err := crypto.HexToECDSA(strings.TrimPrefix(aliceKey, "0x"))
+	if err != nil {
+		return fmt.Errorf("parse alice key: %w", err)
+	}
 	addr := crypto.PubkeyToAddress(key.PublicKey)
+	_ = addr // server resolves the expected signer via getAgentWallet(agentId)
+
+	agentID, err := readAgentID()
+	if err != nil {
+		return fmt.Errorf("read agent id: %w", err)
+	}
 
 	fmt.Println("--- case 1: cross-chain replay rejection ---")
-	if err := wrongChainSig(addr, key); err != nil {
+	if err := wrongChainSig(agentID, key, chainID); err != nil {
 		return fmt.Errorf("case 1: %w", err)
 	}
 
 	fmt.Println("--- case 2: correct-chain signature succeeds ---")
-	c, err := authenticate(addr, key)
+	c, err := authenticate(agentID, key, chainID)
 	if err != nil {
 		return fmt.Errorf("case 2: %w", err)
 	}
 	defer c.Close()
 
-	fmt.Println("--- case 3: mutation watcher KILLs after on-chain rename ---")
-	if err := triggerRename(); err != nil {
+	if skipCase3 != "" {
+		fmt.Println("--- case 3: SKIPPED (destructive on mainnet — would mutate the production agent record) ---")
+		return nil
+	}
+	fmt.Println("--- case 3: mutation watcher KILLs after on-chain JSON rename ---")
+	if err := triggerJSONNameChange(agentID); err != nil {
 		return err
 	}
-	// We expect the connection to be closed by the server within ~3 watcher
-	// cycles. Read until EOF or timeout.
-	deadline := time.Now().Add(8 * time.Second)
-	rd := bufio.NewReader(c)
-	closed := false
-	for time.Now().Before(deadline) {
-		c.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-		line, err := rd.ReadString('\n')
-		if err != nil {
-			if isTimeout(err) {
-				continue
-			}
-			fmt.Printf("  alice-bot got disconnect: %v\n", err)
-			closed = true
-			break
-		}
-		fmt.Printf("  alice-bot <- %s", line)
-		if strings.Contains(line, "ERROR") || strings.Contains(line, "QUIT") {
-			fmt.Println("  ✓ saw server-initiated termination message")
-		}
-	}
-	if !closed {
-		return fmt.Errorf("connection was not closed within 8s of on-chain rename")
+	if err := expectDisconnect(c, watcherWindow); err != nil {
+		return fmt.Errorf("case 3: %w", err)
 	}
 	fmt.Println("  ✓ connection terminated by mutation watcher")
 	return nil
 }
 
-// wrongChainSig signs a body bound to chain 8453 (Base mainnet) and presents
-// it to a server expecting chain 31337 (anvil). Should hit 904.
-func wrongChainSig(claimed common.Address, signKey *ecdsa.PrivateKey) error {
+// wrongChainSig signs a body bound to a chain id that is intentionally
+// NOT the server's expected chain (chainID+1) and presents it. Since the
+// hashed body differs, ecrecover returns a wrong address and the server
+// hits 904 ERR_SASLFAIL.
+func wrongChainSig(agentID *big.Int, signKey *ecdsa.PrivateKey, chainID uint64) error {
+	wrongChain := chainID + 1
+	if chainID == 8453 {
+		wrongChain = 31337
+	} else if chainID == 31337 {
+		wrongChain = 8453
+	}
 	c, err := net.Dial("tcp", "localhost:"+port)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
 	rd := bufio.NewReader(c)
-	send := func(line string) {
-		_, _ = c.Write([]byte(line + "\r\n"))
-	}
+	send := func(line string) { _, _ = c.Write([]byte(line + "\r\n")) }
 	readLine := func() (string, error) {
 		c.SetReadDeadline(time.Now().Add(2 * time.Second))
 		line, err := rd.ReadString('\n')
@@ -125,33 +150,35 @@ func wrongChainSig(claimed common.Address, signKey *ecdsa.PrivateKey) error {
 	if _, err := waitFor(readLine, "AUTHENTICATE +", 2*time.Second); err != nil {
 		return err
 	}
-	send("AUTHENTICATE " + base64.StdEncoding.EncodeToString(claimed.Bytes()))
+	// Step 1: 32-byte agentId on the wire.
+	send("AUTHENTICATE " + base64.StdEncoding.EncodeToString(agentIDBytes(agentID)))
 	chLine, err := waitFor(readLine, "AUTHENTICATE", 2*time.Second)
 	if err != nil {
 		return err
 	}
 	chB64 := strings.TrimSpace(chLine[strings.LastIndex(chLine, "AUTHENTICATE ")+len("AUTHENTICATE "):])
 	nonce, _ := base64.StdEncoding.DecodeString(chB64)
-	// Sign for the WRONG chain.
-	body := []byte(fmt.Sprintf("%s\nchain=8453\nserver=%s\nnonce=%s",
-		domain, serverName, hex.EncodeToString(nonce)))
+	// Sign for the WRONG chain — recovered address will differ.
+	body := []byte(fmt.Sprintf("%s\nchain=%d\nserver=%s\nagentId=%s\nnonce=%s",
+		domain, wrongChain, serverName, agentID.String(), hex.EncodeToString(nonce)))
 	hash := eip191Hash(body)
 	sig, _ := crypto.Sign(hash, signKey)
 	send("AUTHENTICATE " + base64.StdEncoding.EncodeToString(sig))
 	line, err := waitFor(readLine, " 904 ", 3*time.Second)
 	if err != nil {
-		return fmt.Errorf("expected 904: %w", err)
+		return fmt.Errorf("expected 904 ERR_SASLFAIL: %w", err)
 	}
-	if !strings.Contains(line, "signature verification failed") {
-		return fmt.Errorf("expected sig failure, got: %s", line)
+	if !strings.Contains(line, "signature") && !strings.Contains(line, "signer") {
+		return fmt.Errorf("expected sig/signer failure, got: %s", line)
 	}
 	fmt.Println("  ✓ wrong-chain signature rejected")
 	return nil
 }
 
-// authenticate runs the full success path with the correct chain binding.
-// Returns a still-connected socket so case 3 can observe the KILL.
-func authenticate(claimed common.Address, signKey *ecdsa.PrivateKey) (net.Conn, error) {
+// authenticate runs the full success path with the correct (chain, server,
+// agentId) binding. Returns the still-connected socket so case 3 can observe
+// the watcher-initiated KILL.
+func authenticate(agentID *big.Int, signKey *ecdsa.PrivateKey, chainID uint64) (net.Conn, error) {
 	c, err := net.Dial("tcp", "localhost:"+port)
 	if err != nil {
 		return nil, err
@@ -179,7 +206,7 @@ func authenticate(claimed common.Address, signKey *ecdsa.PrivateKey) (net.Conn, 
 		c.Close()
 		return nil, err
 	}
-	send("AUTHENTICATE " + base64.StdEncoding.EncodeToString(claimed.Bytes()))
+	send("AUTHENTICATE " + base64.StdEncoding.EncodeToString(agentIDBytes(agentID)))
 	chLine, err := waitFor(readLine, "AUTHENTICATE", 3*time.Second)
 	if err != nil {
 		c.Close()
@@ -187,8 +214,8 @@ func authenticate(claimed common.Address, signKey *ecdsa.PrivateKey) (net.Conn, 
 	}
 	chB64 := strings.TrimSpace(chLine[strings.LastIndex(chLine, "AUTHENTICATE ")+len("AUTHENTICATE "):])
 	nonce, _ := base64.StdEncoding.DecodeString(chB64)
-	body := []byte(fmt.Sprintf("%s\nchain=%d\nserver=%s\nnonce=%s",
-		domain, chainID, serverName, hex.EncodeToString(nonce)))
+	body := []byte(fmt.Sprintf("%s\nchain=%d\nserver=%s\nagentId=%s\nnonce=%s",
+		domain, chainID, serverName, agentID.String(), hex.EncodeToString(nonce)))
 	sig, _ := crypto.Sign(eip191Hash(body), signKey)
 	send("AUTHENTICATE " + base64.StdEncoding.EncodeToString(sig))
 	if _, err := waitFor(readLine, " 903 ", 3*time.Second); err != nil {
@@ -204,22 +231,70 @@ func authenticate(claimed common.Address, signKey *ecdsa.PrivateKey) (net.Conn, 
 	return c, nil
 }
 
-// triggerRename calls setName on the registry, mutating alice-bot → alice2.
-func triggerRename() error {
-	addrBytes, err := os.ReadFile(registryAddrEnv)
+// expectDisconnect reads the connection until EOF/disconnect or timeout.
+// Returns nil if the server tore the connection down within `dur`.
+func expectDisconnect(c net.Conn, dur time.Duration) error {
+	deadline := time.Now().Add(dur)
+	rd := bufio.NewReader(c)
+	for time.Now().Before(deadline) {
+		c.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		line, err := rd.ReadString('\n')
+		if err != nil {
+			if isTimeout(err) {
+				continue
+			}
+			fmt.Printf("  alice-bot got disconnect: %v\n", err)
+			return nil
+		}
+		fmt.Printf("  alice-bot <- %s", line)
+		if strings.Contains(line, "ERROR") || strings.Contains(line, "QUIT") {
+			fmt.Println("  ✓ saw server-initiated termination message")
+		}
+	}
+	return fmt.Errorf("connection was not closed within %s of the on-chain mutation", dur)
+}
+
+// triggerJSONNameChange calls setAgentURI on the registry to swap the
+// data: URI alice was registered with for one whose `.name` is "alice2".
+// The watcher polls Resolve(agentId), parses the new JSON, sees the name
+// no longer matches the bound IRC account, and KILLs the session.
+//
+// setAgentURI is owner-gated; the deployer-registered NFT was minted to
+// alice's wallet (msg.sender), so signing with alice's key suffices.
+func triggerJSONNameChange(agentID *big.Int) error {
+	addrBytes, err := os.ReadFile(registryFile)
 	if err != nil {
-		return fmt.Errorf("read .registry-address: %w", err)
+		return fmt.Errorf("read %s: %w", registryFile, err)
 	}
 	registry := strings.TrimSpace(string(addrBytes))
-	cmd := exec.Command("cast", "send",
-		"--rpc-url", "http://localhost:8545",
-		"--private-key", "0x"+registeredKey,
-		registry, "setName(string)", "alice2",
+	newURI := `data:application/json,{"name":"alice2"}`
+	cmd := exec.CommandContext(context.Background(), "cast", "send",
+		"--rpc-url", rpcURL,
+		"--private-key", "0x"+aliceKey,
+		registry, "setAgentURI(uint256,string)", agentID.String(), newURI,
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	fmt.Println("  >> sending setName(\"alice2\") on-chain")
+	fmt.Printf("  >> setAgentURI(%s, %q) on-chain\n", agentID.String(), newURI)
 	return cmd.Run()
+}
+
+func readAgentID() (*big.Int, error) {
+	b, err := os.ReadFile(agentIDFile)
+	if err != nil {
+		return nil, err
+	}
+	id, ok := new(big.Int).SetString(strings.TrimSpace(string(b)), 10)
+	if !ok {
+		return nil, fmt.Errorf("could not parse agent id %q", string(b))
+	}
+	return id, nil
+}
+
+// agentIDBytes pads agentId into the 32-byte big-endian uint256 the fork
+// expects in AUTHENTICATE step 1.
+func agentIDBytes(agentID *big.Int) []byte {
+	return common.BigToHash(agentID).Bytes()
 }
 
 func eip191Hash(body []byte) []byte {

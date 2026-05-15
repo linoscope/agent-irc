@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
-# Same as chapter 08b but on a different port + cribs from chapter 08b's
-# ircd.yaml as a starting point.
+# Build the agent-irc-ergo fork at the chapter-10 tag and start it with the
+# ERC8004 registry config injected. The CLI side then authenticates with
+# `agent-irc connect ... --erc8004-key keys/<nick>.key ...`.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 ERGO_SRC="${ERGO_SRC:-$HOME/workspace/agent-irc-ergo}"
 ERGO_TAG="${ERGO_TAG:-chapter-erc8004-canonical}"
-ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc-ch09}"
-PORT="${PORT:-16675}"
+ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc-ch11}"
+PORT="${PORT:-16678}"
 RPC="${RPC:-http://localhost:8545}"
-REGISTRY_ADDR=$(cat .registry-address 2>/dev/null || true)
-if [[ -z "$REGISTRY_ADDR" ]]; then
-    echo "ERROR: ./.registry-address missing — run ./deploy.sh first." >&2
-    exit 1
-fi
+REGISTRY_ADDR=$(cat .registry-address)
 
 echo ">> checking out $ERGO_TAG in $ERGO_SRC and building into $ERGO_BIN"
 ( cd "$ERGO_SRC" \
@@ -23,28 +20,24 @@ echo ">> checking out $ERGO_TAG in $ERGO_SRC and building into $ERGO_BIN"
 rm -rf data
 mkdir -p data
 
-# Regenerate ircd.yaml deterministically from defaults each run. Trying to
-# patch a previously-patched file with regex is fragile; defaultconfig is
-# the only stable starting point.
+# Regenerate ircd.yaml from defaultconfig so we always pick up the fork's
+# current schema, then patch in the listener / paths / ERC8004 block.
 "$ERGO_BIN" defaultconfig > ircd.yaml
-sed -i -E "s|    listeners:.*?(?=\n    unix-bind-mode|\n    tor-listeners)|    listeners:\n        \":$PORT\":\n|s" ircd.yaml || true
-# The above multi-line sed is finicky; do it in python for reliability.
 python3 <<PY
 import re
 p = "ircd.yaml"
 src = open(p).read()
-# Replace listeners with one plaintext listener.
 src = re.sub(
     r'    listeners:.*?(?=\n    unix-bind-mode|\n    tor-listeners)',
     f'    listeners:\n        ":$PORT":\n',
     src, count=1, flags=re.DOTALL,
 )
-# Disable languages.
+# Always-on lets nicks stay registered when their session drops — matches the
+# appendix-cli-agent setup so the CLI's daemon-keeps-the-seat semantics hold.
+src = src.replace("always-on: \"opt-in\"", "always-on: \"mandatory\"")
 src = src.replace("    enabled: true\n\n    # default language", "    enabled: false\n\n    # default language")
-# Pin lock + db paths into ./data.
 src = src.replace("path: ircd.db", "path: data/ircd.db")
 src = src.replace('lock-file: "ircd.lock"', 'lock-file: "data/ircd.lock"')
-# Insert the erc8004 block as the first child under `accounts:`.
 new_block = """
     erc8004:
         rpc-url: "$RPC"

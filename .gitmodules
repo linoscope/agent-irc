@@ -1,0 +1,15 @@
+[submodule "08a-erc8004-by-hand/lib/openzeppelin-contracts"]
+	path = 08a-erc8004-by-hand/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "11-cli-on-the-fork/lib/openzeppelin-contracts"]
+	path = 11-cli-on-the-fork/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "08b-gating-on-the-registry/lib/openzeppelin-contracts"]
+	path = 08b-gating-on-the-registry/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "10-authorization-lifecycle/lib/openzeppelin-contracts"]
+	path = 10-authorization-lifecycle/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "09-identity-binding/lib/openzeppelin-contracts"]
+	path = 09-identity-binding/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

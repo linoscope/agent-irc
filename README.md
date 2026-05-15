@@ -1,6 +1,6 @@
 # agent-irc Tutorial: IRC Internals from Wire Bytes to On-Chain Identity
 
-A 10-chapter walkthrough of how IRC actually works under the hood, ending with a working IRC server where agent registration is gated by an [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) on-chain registry and the registered name is the IRC display name.
+An 11-chapter walkthrough of how IRC actually works under the hood, ending with a working IRC server where agent registration is gated by an [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) on-chain registry, the registered name is the IRC display name, and a Go CLI talks to it with a wallet keypair in place of a password.
 
 ## Try it now: put your agent in the channel
 
@@ -21,9 +21,11 @@ This tutorial closes that gap. The first three chapters have you build a minimal
 ## End goal: a DevAuth IRC substrate for AI agents
 
 By the end:
-- IRC connections are gated by ERC-8004 registry membership.
-- An agent's IRC identity is its on-chain name. Nick changes are rejected; authorization keys on the verified `account-tag`.
-- The substrate is a single Ergo binary you can deploy anywhere, with a small fork containing the SASL mechanism and the registry-check path.
+- IRC connections are gated by the **canonical [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) Identity Registry** (live on Base mainnet at `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`). The fork's SASL handler calls `getAgentWallet(agentId)` to verify the signer, then resolves `tokenURI(agentId)` to learn the agent's display name.
+- An agent's IRC identity is its on-chain agentId; the IRC nick is the `.name` field of the agent's off-chain JSON. Nick changes are rejected; authorization keys on the verified `account-tag`.
+- The substrate is a single Ergo binary you can deploy anywhere, with a small fork containing the SASL mechanism, the registry-check path, and the JSON-fetch pipeline.
+- A single Go CLI (`agent-irc`, with `--erc8004-key PATH --agent-id N`) authenticates to that substrate with a wallet keypair in place of a password and exposes `connect` / `join` / `send` / `tail` to any agent — bash, Python, Claude Code — without that agent ever touching the SASL wire.
+- Every chapter from 08a onward ships **two verify scripts**: an offline `verify.sh` that runs the whole stack on anvil, and a `verify-mainnet.sh` (or `verify-base-mainnet.sh`) that runs the same flow against the live Base mainnet registry with a funded test agent.
 
 ## Tutorial sections
 
@@ -47,14 +49,18 @@ Retire the toy. Switch to Ergo and walk through the IRCv3 stack that converts IR
 ### Part III — agent-irc customizations
 
 7. **[07-custom-sasl-erc8004](./07-custom-sasl-erc8004)** — A new SASL mechanism: server emits a nonce, client signs with a wallet keypair, server `ecrecover`s. No on-chain check yet.
-8. **[08a-erc8004-by-hand](./08a-erc8004-by-hand)** — Understand ERC-8004 by deploying a registry on local anvil and poking at it with `cast` — register, query, rename, read events. No fork required.
-   - **[08b-gating-on-the-registry](./08b-gating-on-the-registry)** — Wire the fork to consult the registry: the chapter-07 SASL handler now requires registry membership. Successful signatures from non-registered addresses get 904.
-9. **[09-identity-binding](./09-identity-binding)** — ERC-8004 name = account = forced nick. Charset normalization. Validation rejects names that don't conform to IRC nick rules.
-10. **[10-authorization-lifecycle](./10-authorization-lifecycle)** — Cross-chain replay protection (sig binds to `chain_id` + server name); KILL on registry rename/removal via a periodic mutation watcher.
+8. **[08a-erc8004-by-hand](./08a-erc8004-by-hand)** — Understand canonical ERC-8004 by deploying a faithful clone of the Base mainnet contract locally and walking through it with `cast` — `register`/`getAgentWallet`/`tokenURI`/`setAgentURI`, plus reading the same data off the live Base deployment.
+   - **[08b-gating-on-the-registry](./08b-gating-on-the-registry)** — Wire the fork to consult the registry: SASL now requires that the recovered address matches `getAgentWallet(agentId)` for the claimed on-chain identity.
+9. **[09-identity-binding](./09-identity-binding)** — IRC nick = `.name` field of the JSON pointed to by `tokenURI(agentId)`. The fork HTTP-fetches the JSON during SASL, parses `.name`, validates it against the IRC charset.
+10. **[10-authorization-lifecycle](./10-authorization-lifecycle)** — Replay protection (sig binds to `chain_id` + server name + `agent_id`); KILL on wallet rotation or JSON name change via a periodic mutation watcher.
+
+### Part IV — Client capstone
+
+11. **[11-cli-on-the-fork](./11-cli-on-the-fork)** — The matching client surface. The [`agent-irc` CLI](./cli) gains an ERC-8004 SASL backend (`--erc8004-key PATH --agent-id N --chain-id N --server-name NAME`); two agents authenticate with their wallet keypairs and exchange messages whose server-stamped `account-tag` is the JSON-derived name. Includes a `verify-base-mainnet.sh` that runs the same flow against the canonical Base mainnet registry — zero gas, real on-chain identity.
 
 ### Appendix
 
-- **[appendix-cli-agent](./appendix-cli-agent)** — How agents actually use this network. Hands-on tutorial that uses the [`cli/`](./cli) Go binary to wire two agents into a channel with ~10 lines of bash apiece. ERC-8004 is set aside; the appendix runs against stock Ergo so the focus stays on the client ergonomic. Includes [JOINING.md](./cli/JOINING.md) for visitors and [HOSTING.md](./cli/HOSTING.md) for operators.
+- **[appendix-cli-agent](./appendix-cli-agent)** — Gentler client demo. Same CLI binary, same ergonomics, but against stock Ergo with plain SASL so the focus stays on the *client* shape (daemon-per-nick, JSONL events, Claude-Code-driven personas). The chapter-11 capstone uses the same surface with ERC-8004 SASL plugged in. Includes [JOINING.md](./cli/JOINING.md) for visitors and [HOSTING.md](./cli/HOSTING.md) for operators.
 
 ## Prerequisites
 
@@ -65,7 +71,7 @@ Retire the toy. Switch to Ergo and walk through the IRCv3 stack that converts IR
 | `nc` (netcat) | Raw protocol verification | usually preinstalled |
 | `python3` | Tutorial scripts use Python for YAML manipulation in `start-ergo.sh` | usually preinstalled |
 | `foundry` (`anvil`, `forge`, `cast`) | Local Ethereum devnet (Part III, ch08+) | `curl -L https://foundry.paradigm.xyz \| bash && foundryup` |
-| Ergo source clone (chapters 04–10) | Build target | see "Repository layout" below |
+| Ergo source clone (chapters 04–11) | Build target | see "Repository layout" below |
 
 ### Go toolchain note
 
@@ -75,7 +81,7 @@ Ergo's `go.mod` says `go 1.26`. `GOTOOLCHAIN=auto` (the default) only works if a
 GOTOOLCHAIN=go1.26.2 go build .
 ```
 
-The `start-ergo.sh` scripts in chapters 04–10 already set this. If you're on Go 1.26.x already, there's nothing to do.
+The `start-ergo.sh` scripts in chapters 04–11 already set this. If you're on Go 1.26.x already, there's nothing to do.
 
 ## Repository layout
 
@@ -83,7 +89,8 @@ This is a monorepo. Inside `~/workspace/agent-irc/`:
 
 | Path | What |
 |---|---|
-| `01-hello-irc/` … `10-authorization-lifecycle/` | The tutorial chapters, each its own self-contained Go module + verify |
+| `01-hello-irc/` … `10-authorization-lifecycle/` | Tutorial chapters 01–10 (the server side), each its own self-contained Go module + verify |
+| `11-cli-on-the-fork/` | Chapter 11 — the client-side capstone; ERC-8004 SASL over the `agent-irc` CLI |
 | `cli/` | The Go `agent-irc` CLI binary — the canonical client artifact |
 | `appendix-cli-agent/` | Hands-on tutorial showing two agents talking via the CLI |
 | `ergo/` | Pointer to the agent-irc-ergo fork (currently lives separately at `~/workspace/agent-irc-ergo/`; future: integrated via git subtree) |
@@ -96,7 +103,7 @@ Two sibling directories the tutorial expects:
 | Path | What | When you need it |
 |---|---|---|
 | `~/workspace/ergo/` | A clone of upstream [ergochat/ergo](https://github.com/ergochat/ergo) | Chapter 04 (the read-only "real Ergo" build) |
-| `~/workspace/agent-irc-ergo/` | Our fork of Ergo with the agent-irc customizations | Chapters 05–10 |
+| `~/workspace/agent-irc-ergo/` | Our fork of Ergo with the agent-irc customizations | Chapters 05–11 |
 
 To set up:
 
@@ -111,7 +118,7 @@ git remote set-url origin https://github.com/ergochat/ergo.git
 git checkout -b agent-irc
 ```
 
-The fork lives on the `agent-irc` branch with one commit per chapter (ch05, ch07, ch08, ch09, ch10). Each commit is also tagged: `chapter-05`, `chapter-07`, `chapter-08`, `chapter-09`, `chapter-10`. Chapter 06 introduces no fork changes — it exercises Ergo's existing SASL.
+The fork's spec-aligned end state lives on the `agent-irc-spec` branch at tag `chapter-erc8004-canonical`. Chapters 08b through 11 all check out this tag in their `start-ergo.sh`. Older per-chapter tags (`chapter-05`, `chapter-07`, `chapter-08`, `chapter-09`, `chapter-10`) still exist on the original `agent-irc` branch as historical artifacts of the pre-spec-alignment iteration — they were retained so the git history reads as "we built the wrong shape, learned, and aligned with the actual ERC-8004 spec." Chapter 06 introduces no fork changes — it exercises Ergo's existing SASL.
 
 ### Why per-chapter tags?
 

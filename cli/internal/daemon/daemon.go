@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"time"
 
 	"github.com/lin/agent-irc/cli/internal/bridge"
+	"github.com/lin/agent-irc/cli/internal/erc8004"
 	"github.com/lin/agent-irc/cli/internal/protocol"
 )
 
@@ -58,6 +60,17 @@ type Config struct {
 	Nick     string
 	TLS      bool
 	Password string
+
+	// ERC8004 mode (chapter 11 of the tutorial). When ERC8004KeyPath is set,
+	// the daemon authenticates using the agent-irc-ergo SASL mechanism with
+	// the key at that path, binding the signature to ChainID + ServerName
+	// + AgentID. AgentID is the ERC-721 token id under which the key is
+	// registered in the canonical ERC-8004 Identity Registry; 0 means
+	// chapter-07 (pre-canonical, no registry) mode.
+	ERC8004KeyPath string
+	AgentID        uint64
+	ChainID        uint64
+	ServerName     string
 }
 
 type subscription struct {
@@ -73,19 +86,32 @@ type channelBuf struct {
 }
 
 // New creates a Server. Call Run() to start.
-func New(cfg Config) *Server {
+func New(cfg Config) (*Server, error) {
 	s := &Server{
 		cfg:      cfg,
 		channels: map[string]*channelBuf{},
 	}
-	s.br = bridge.New(bridge.Config{
+	bcfg := bridge.Config{
 		Server:   cfg.Server,
 		Nick:     cfg.Nick,
 		TLS:      cfg.TLS,
 		Password: cfg.Password,
 		OnEvent:  s.onEvent,
-	})
-	return s
+	}
+	if cfg.ERC8004KeyPath != "" {
+		key, err := erc8004.LoadKey(cfg.ERC8004KeyPath)
+		if err != nil {
+			return nil, err
+		}
+		bcfg.ERC8004Key = key
+		bcfg.ChainID = cfg.ChainID
+		bcfg.ServerName = cfg.ServerName
+		if cfg.AgentID != 0 {
+			bcfg.AgentID = new(big.Int).SetUint64(cfg.AgentID)
+		}
+	}
+	s.br = bridge.New(bcfg)
+	return s, nil
 }
 
 // Run connects to IRC, opens the socket, and serves requests until the

@@ -368,7 +368,7 @@ accounts:
 
     erc8004:
         rpc-url: "http://localhost:8545"
-        registry-address: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+        registry-address: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
         chain-id: 31337
         cache-ttl: 0s
     # is account authentication enabled, i.e., can users log into existing accounts?

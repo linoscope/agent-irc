@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 ERGO_SRC="${ERGO_SRC:-$HOME/workspace/agent-irc-ergo}"
-ERGO_TAG="${ERGO_TAG:-chapter-08}"
+ERGO_TAG="${ERGO_TAG:-chapter-erc8004-canonical}"
 ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc-ch08}"
 PORT="${PORT:-16674}"
 RPC="${RPC:-http://localhost:8545}"

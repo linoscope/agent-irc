@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
-# Same as chapter 08b but on a different port + cribs from chapter 08b's
-# ircd.yaml as a starting point.
+# Start the agent-irc-ergo fork pointed at Base mainnet's canonical
+# ERC-8004 Identity Registry at 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432.
+# Use this in place of start-ergo.sh when you want to run the SASL gate
+# against real on-chain identities rather than a local anvil deployment.
+#
+# Prerequisite: the agent you'll authenticate as must already be registered
+# in that registry, and tokenURI(agentId) must point at a URL that
+# resolves to JSON whose `.name` is a valid IRC nick.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 ERGO_SRC="${ERGO_SRC:-$HOME/workspace/agent-irc-ergo}"
 ERGO_TAG="${ERGO_TAG:-chapter-erc8004-canonical}"
-ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc-ch09}"
-PORT="${PORT:-16675}"
-RPC="${RPC:-http://localhost:8545}"
-REGISTRY_ADDR=$(cat .registry-address 2>/dev/null || true)
-if [[ -z "$REGISTRY_ADDR" ]]; then
-    echo "ERROR: ./.registry-address missing — run ./deploy.sh first." >&2
-    exit 1
-fi
+ERGO_BIN="${ERGO_BIN:-/tmp/ergo-agentirc-ch11-base}"
+PORT="${PORT:-16678}"
+RPC="${RPC:-https://mainnet.base.org}"
+REGISTRY_ADDR="${REGISTRY_ADDR:-0x8004A169FB4a3325136EB29fA0ceB6D2e539a432}"
+CHAIN_ID="${CHAIN_ID:-8453}"
+CACHE_TTL="${CACHE_TTL:-30s}"
 
 echo ">> checking out $ERGO_TAG in $ERGO_SRC and building into $ERGO_BIN"
 ( cd "$ERGO_SRC" \
@@ -23,34 +27,26 @@ echo ">> checking out $ERGO_TAG in $ERGO_SRC and building into $ERGO_BIN"
 rm -rf data
 mkdir -p data
 
-# Regenerate ircd.yaml deterministically from defaults each run. Trying to
-# patch a previously-patched file with regex is fragile; defaultconfig is
-# the only stable starting point.
 "$ERGO_BIN" defaultconfig > ircd.yaml
-sed -i -E "s|    listeners:.*?(?=\n    unix-bind-mode|\n    tor-listeners)|    listeners:\n        \":$PORT\":\n|s" ircd.yaml || true
-# The above multi-line sed is finicky; do it in python for reliability.
 python3 <<PY
 import re
 p = "ircd.yaml"
 src = open(p).read()
-# Replace listeners with one plaintext listener.
 src = re.sub(
     r'    listeners:.*?(?=\n    unix-bind-mode|\n    tor-listeners)',
     f'    listeners:\n        ":$PORT":\n',
     src, count=1, flags=re.DOTALL,
 )
-# Disable languages.
+src = src.replace("always-on: \"opt-in\"", "always-on: \"mandatory\"")
 src = src.replace("    enabled: true\n\n    # default language", "    enabled: false\n\n    # default language")
-# Pin lock + db paths into ./data.
 src = src.replace("path: ircd.db", "path: data/ircd.db")
 src = src.replace('lock-file: "ircd.lock"', 'lock-file: "data/ircd.lock"')
-# Insert the erc8004 block as the first child under `accounts:`.
 new_block = """
     erc8004:
         rpc-url: "$RPC"
         registry-address: "$REGISTRY_ADDR"
-        chain-id: 31337
-        cache-ttl: 0s
+        chain-id: $CHAIN_ID
+        cache-ttl: $CACHE_TTL
 """
 src = re.sub(r'(\naccounts:\n)', r'\1' + new_block, src)
 open(p, "w").write(src)

@@ -1,0 +1,9 @@
+data/
+cache/
+out/
+broadcast/
+.registry-address
+ircd.yaml
+ircd.lock
+keys/*.key
+

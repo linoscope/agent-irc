@@ -118,11 +118,26 @@ git remote set-url origin https://github.com/ergochat/ergo.git
 git checkout -b agent-irc
 ```
 
-The fork's spec-aligned end state lives on the `agent-irc-spec` branch at tag `chapter-erc8004-canonical`. Chapters 08b through 11 all check out this tag in their `start-ergo.sh`. Older per-chapter tags (`chapter-05`, `chapter-07`, `chapter-08`, `chapter-09`, `chapter-10`) still exist on the original `agent-irc` branch as historical artifacts of the pre-spec-alignment iteration — they were retained so the git history reads as "we built the wrong shape, learned, and aligned with the actual ERC-8004 spec." Chapter 06 introduces no fork changes — it exercises Ergo's existing SASL.
+The fork lives on the `agent-irc` branch. Two waves of work, two tag schemes:
 
-### Why per-chapter tags?
+| Tag | What it points at | Used by |
+|---|---|---|
+| `chapter-05` | First fork modification: `agent-irc.example/hello` vendor cap | Chapter 05b |
+| `chapter-07-precanonical` | Original chapter-7 SASL shape (20-byte address, pre-canonical) | Chapter 07 |
+| `chapter-08-precanonical` | Original chapter-8 registry gate with custom `nameOf(addr)` | Archived; no chapter uses it |
+| `chapter-09-precanonical` | Original chapter-9 nick-binding based on the custom shape | Archived |
+| `chapter-10-precanonical` | Original chapter-10 watcher + chain/server binding (pre-canonical) | Archived |
+| **`chapter-11`** | **Spec-aligned end state — canonical ERC-721 + `tokenURI` JSON + `getAgentWallet` + full lifecycle** | **Chapters 08b, 09, 10, 11** |
 
-When a chapter's `start-ergo.sh` runs, it checks out *that chapter's tag* before building, so each chapter's verify runs against the fork-as-of-that-chapter. This prevents later chapters' code from leaking back into earlier chapters' tests (e.g., chapter 10's body-binding doesn't break chapter 7's signature verification, because chapter 7 builds against the `chapter-07` tag which doesn't have that code yet).
+Chapter 06 introduces no fork changes — it exercises Ergo's existing SASL.
+
+### Why the precanonical archive?
+
+The first pass of chapters 07–10 used a custom `nameOf(address) → string` shape that turned out not to match [EIP-8004](https://eips.ethereum.org/EIPS/eip-8004). The spec-alignment refactor (the present `chapter-11` tag) collapsed those four chapters into a single fork state since the spec-compliant registry adapter ends up unified — but the original per-chapter tags are kept under the `-precanonical` suffix so anyone reading the git history can see what the pivot replaced and why.
+
+### Why one tag for chapters 08b–11?
+
+The original per-chapter tag scheme aimed to isolate each chapter's verify against the fork-as-of-that-chapter. That mattered when each new chapter added an *incompatible* new wire field (e.g., chapter 10's body-binding would break chapter 7's verify). The canonical ERC-8004 stack doesn't need that isolation: the same fork code transparently handles a chapter-7-shaped (no agentId) request through the same SASL handler that a chapter-11-shaped (full agentId + URI fetch) request goes through, by way of the spec's "registry not configured → fall back to signature-only" path. So chapters 08b–11 all build the same fork binary; what differs between them is the `accounts.erc8004` block in each chapter's generated `ircd.yaml` (whether the gate is enabled, whether the watcher polls, etc.).
 
 Each chapter builds its own binary at `/tmp/ergo-agentirc-chXX`. They coexist on disk; running chapter N doesn't disturb other chapters' builds.
 
